@@ -84,18 +84,16 @@ let beatManuallyToggled = false;
 
 
 document.addEventListener('DOMContentLoaded', () => {
-    const startBtn = document.getElementById('start-btn');
-    const overlay = document.getElementById('start-overlay');
-
-    startBtn.addEventListener('click', async () => {
+    // Init audio on first interaction
+    const initOnInteraction = async () => {
         await initAudio();
-        overlay.classList.add('hidden');
-    });
-
-    // Skip overlay if ?play=1 (linked from instruments hub)
-    if (new URLSearchParams(window.location.search).get('play') === '1') {
-        initAudio().then(() => overlay.classList.add('hidden'));
-    }
+        document.removeEventListener('keydown', initOnInteraction);
+        document.removeEventListener('touchstart', initOnInteraction);
+        document.removeEventListener('mousedown', initOnInteraction);
+    };
+    document.addEventListener('keydown', initOnInteraction);
+    document.addEventListener('touchstart', initOnInteraction);
+    document.addEventListener('mousedown', initOnInteraction);
 
     // Controls modal
     const controlsBtn = document.getElementById('controls-btn');
@@ -113,9 +111,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const morphBtn = document.getElementById('morph-btn');
     if (morphBtn) morphBtn.addEventListener('click', () => handleMorph());
 
-    // Logo → return to start
+    // Logo → back to instruments hub
     const logoHome = document.getElementById('logo-home');
-    if (logoHome) logoHome.addEventListener('click', () => overlay.classList.remove('hidden'));
+    if (logoHome) logoHome.addEventListener('click', () => window.location.href = '../');
 
     // BPM input
     const bpmInput = document.getElementById('bpm-input');
@@ -616,14 +614,7 @@ function handleKeyDown(e) {
     }
 
     if (e.key === 'Escape') {
-        const overlay = document.getElementById('start-overlay');
-        if (!overlay.classList.contains('hidden')) {
-            // ESC on landing page → go back to SA
-            window.location.href = 'https://simonallmer.com';
-        } else {
-            // ESC on play screen → show landing page
-            overlay.classList.remove('hidden');
-        }
+        window.location.href = '../';
         return;
     }
 
