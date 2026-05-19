@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Pentamorph</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;500;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+</head>
+
+<body>
+
+    <div id="start-overlay" class="overlay">
+        <a href="../" class="back-to-sa-corner">&#8592; INSTRUMENTS</a>
+        <div class="overlay-content">
+            <h1>PENTAMORPH</h1>
+            <p class="description">An isomorphic instrument for futuristic sonic exploration. Morph through tonal
+                landscapes and rhythmic dimensions using your computer keyboard. Simon is currently developing the
+                physical Pentamorph which recognizes each finger automatically and creates the corresponding
+                pressure-sensitive note. Expected release December 2026.</p>
+            <div class="requirement">
+                COMPUTER KEYBOARD RECOMMENDED
+            </div>
+            <button id="start-btn">ACCESS</button>
+            <a href="../" class="start-back-btn">BACK TO INSTRUMENTS</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <div class="header-top-row">
+                <a href="../" class="back-to-sa-corner">&#8592; INSTRUMENTS</a>
+                <div class="logo" id="logo-home" style="cursor: pointer;">PENTAMORPH <span class="version">v2.0
+                        Sphere</span></div>
+                <button class="hamburger-btn" id="hamburger-btn" aria-label="Menu">&#9776;</button>
+            </div>
+
+            <div class="status-panel">
+                <div class="status-item tappable" id="status-morph" title="Tap to cycle scale">
+                    MORPH: <span id="morph-display">MAJOR</span>
+                </div>
+                <div class="status-item tappable" id="status-note-bank" title="Tap to cycle synth bank">
+                    NOTE BANK: <span id="note-bank-display">SPHERE</span>
+                </div>
+                <div class="status-item tappable" id="status-perc-bank" title="Tap to cycle perc bank">
+                    PERC BANK: <span id="perc-bank-display">KICK</span>
+                </div>
+                <div class="status-item" id="status-octave">
+                    OCTAVE:
+                    <button class="octave-mini-btn" id="octave-status-down" aria-label="Octave down">&#8722;</button>
+                    <span id="octave-display">4</span>
+                    <button class="octave-mini-btn" id="octave-status-up" aria-label="Octave up">+</button>
+                </div>
+            </div>
+
+            <div class="header-controls" id="header-controls">
+                <button id="auto-beats-btn" class="nav-btn">AUTO BEATS</button>
+                <button id="morph-btn" class="nav-btn morph-highlight">MORPH</button>
+                <button id="controls-btn" class="nav-btn">CONTROLS</button>
+            </div>
+        </header>
+
+        <div id="controls-overlay" class="overlay hidden">
+            <div class="overlay-content controls-modal">
+                <button id="close-controls" class="close-btn">&times;</button>
+                <h2>SYSTEM CONTROLS</h2>
+
+                <div class="controls-grid">
+                    <div class="control-group">
+                        <h3>LEFT SPHERE</h3>
+                        <div class="key-row"><span class="key">A</span> <span class="key">S</span> <span
+                                class="key">D</span> <span class="key">F</span> <span class="key">C</span></div>
+                        <p>Pentatonic Scale</p>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>RIGHT SPHERE</h3>
+                        <div class="key-row"><span class="key">B</span> <span class="key">G</span> <span
+                                class="key">H</span> <span class="key">J</span> <span class="key">K</span></div>
+                        <p>High Octave Scale</p>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>SYSTEM</h3>
+                        <div class="key-list">
+                            <div class="key-item"><span class="key">SPACE</span> <span>Beat Loop</span></div>
+                            <div class="key-item"><span class="key">ENTER</span> <span>Morph Scale</span></div>
+                            <div class="key-item"><span class="key">T</span> <span>Auto Beats Toggle</span></div>
+                            <div class="key-item"><span class="key">-</span> <span class="key">+</span> <span>Octave
+                                    Shift</span></div>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>BANKS</h3>
+                        <div class="key-list">
+                            <div class="key-item"><span class="key">&#8593;</span> <span class="key">&#8595;</span>
+                                <span>Change Synth</span></div>
+                            <div class="key-item"><span class="key">&#8592;</span> <span class="key">&#8594;</span>
+                                <span>Change Drums</span></div>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>TOUCH</h3>
+                        <div class="key-list">
+                            <div class="key-item"><span>Tap nodes</span> <span>Play notes</span></div>
+                            <div class="key-item"><span>BEAT btn</span> <span>Toggle beat loop</span></div>
+                            <div class="key-item"><span>Swipe left/right</span> <span>Switch sphere</span></div>
+                            <div class="key-item"><span>Tap status items</span> <span>Cycle settings</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <main class="instrument-interface">
+
+            <div class="sphere-wrapper">
+                <div class="octave-btn left" data-key="-">
+                    <span>-</span>
+                </div>
+
+                <div class="controllers-container">
+                    <!-- Left Controller -->
+                    <div class="sphere-container portrait-active" id="controller-left">
+                        <div class="core-node" id="core-left">
+                            <div class="core-inner"></div>
+                            <div class="core-glow"></div>
+                        </div>
+
+                        <div class="node-wrapper" style="--i: 0;">
+                            <div class="note-node" data-note="0" data-controller="left" data-key="a">
+                                <span class="note-label">A</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 1;">
+                            <div class="note-node" data-note="1" data-controller="left" data-key="s">
+                                <span class="note-label">S</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 2;">
+                            <div class="note-node" data-note="2" data-controller="left" data-key="d">
+                                <span class="note-label">D</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 3;">
+                            <div class="note-node" data-note="3" data-controller="left" data-key="f">
+                                <span class="note-label">F</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 4;">
+                            <div class="note-node" data-note="4" data-controller="left" data-key="c">
+                                <span class="note-label">C</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sphere Switch Indicator (visible in portrait) -->
+                    <div class="sphere-indicator">
+                        <span class="sphere-dot active" data-controller="left"></span>
+                        <span class="sphere-dot" data-controller="right"></span>
+                    </div>
+
+                    <!-- Right Controller -->
+                    <div class="sphere-container" id="controller-right">
+                        <div class="core-node" id="core-right">
+                            <div class="core-inner"></div>
+                            <div class="core-glow"></div>
+                        </div>
+
+                        <div class="node-wrapper" style="--i: 0;">
+                            <div class="note-node" data-note="0" data-controller="right" data-key="b">
+                                <span class="note-label">B</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 1;">
+                            <div class="note-node" data-note="1" data-controller="right" data-key="g">
+                                <span class="note-label">G</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 2;">
+                            <div class="note-node" data-note="2" data-controller="right" data-key="h">
+                                <span class="note-label">H</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 3;">
+                            <div class="note-node" data-note="3" data-controller="right" data-key="j">
+                                <span class="note-label">J</span>
+                            </div>
+                        </div>
+                        <div class="node-wrapper" style="--i: 4;">
+                            <div class="note-node" data-note="4" data-controller="right" data-key="k">
+                                <span class="note-label">K</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="octave-btn right" data-key="+">
+                    <span>+</span>
+                </div>
+            </div>
+
+            <div class="bpm-control">
+                <label for="bpm-input">BPM</label>
+                <button class="bpm-adj" id="bpm-down" aria-label="Decrease BPM">&#8722;</button>
+                <input type="number" id="bpm-input" value="120" min="40" max="300">
+                <button class="bpm-adj" id="bpm-up" aria-label="Increase BPM">+</button>
+            </div>
+
+            <div class="footer-copyright">
+                &copy; 2026 Simon Allmer Entertainment
+            </div>
+        </main>
+
+        <!-- Mobile Toolbar (GarageBand style) -->
+        <div class="mobile-toolbar" id="mobile-toolbar">
+            <button class="tool-btn" id="beat-btn">
+                <span class="tool-icon">&#9654;</span>
+                <span class="tool-label">BEAT</span>
+            </button>
+            <button class="tool-btn" id="switch-sphere-btn">
+                <span class="tool-icon">&#8644;</span>
+                <span class="tool-label">SWITCH</span>
+            </button>
+            <button class="tool-btn" id="mobile-auto-btn">
+                <span class="tool-icon">&#10022;</span>
+                <span class="tool-label">AUTO</span>
+            </button>
+            <button class="tool-btn" id="mobile-morph-btn">
+                <span class="tool-icon">&#9670;</span>
+                <span class="tool-label">MORPH</span>
+            </button>
+            <button class="tool-btn" id="mobile-menu-btn">
+                <span class="tool-icon">&#9776;</span>
+                <span class="tool-label">MENU</span>
+            </button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

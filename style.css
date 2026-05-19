@@ -1,0 +1,253 @@
+/* ===== ALLMER MUSIC INSTRUMENTS — Hub Styles ===== */
+
+:root {
+    --bg:        #050508;
+    --primary:   #00f3ff;
+    --secondary: #bc13fe;
+    --font-display: 'Orbitron', sans-serif;
+    --font-ui:      'Rajdhani', sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html { height: 100%; }
+
+body {
+    background-color: var(--bg);
+    background-image: radial-gradient(circle at 50% 30%, #12123a 0%, #050508 65%);
+    color: #fff;
+    font-family: var(--font-ui);
+    min-height: 100vh;
+}
+
+/* ===== PAGE SHELL ===== */
+.page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
+             env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+}
+
+/* ===== HEADER ===== */
+.hub-header {
+    width: 100%;
+    padding: 24px 40px 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-shrink: 0;
+}
+
+.back-to-sa {
+    font-family: var(--font-ui);
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.45);
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    background: transparent;
+    transition: 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.back-to-sa:hover,
+.back-to-sa:active {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.hub-title {
+    font-family: var(--font-display);
+    font-size: clamp(1rem, 3.5vw, 1.6rem);
+    letter-spacing: 3px;
+    color: var(--primary);
+    text-shadow: 0 0 24px rgba(0, 243, 255, 0.25);
+    line-height: 1.2;
+}
+
+.title-break { display: none; }
+
+/* ===== MAIN ===== */
+.hub-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 30px 40px 40px;
+}
+
+.tagline {
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.3);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 48px;
+    text-align: center;
+}
+
+/* ===== INSTRUMENT GRID ===== */
+.instruments-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 380px));
+    gap: 28px;
+    justify-content: center;
+    width: 100%;
+    max-width: 900px;
+}
+
+/* ===== INSTRUMENT CARD ===== */
+.instrument-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 32px 28px;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 243, 255, 0.2);
+    background: rgba(255, 255, 255, 0.025);
+    text-decoration: none;
+    color: #fff;
+    overflow: hidden;
+    transition: border-color 0.3s, background 0.3s, transform 0.2s;
+    cursor: pointer;
+    user-select: none;
+    min-height: 260px;
+}
+
+.instrument-card:not(.locked):hover {
+    border-color: rgba(0, 243, 255, 0.6);
+    background: rgba(0, 243, 255, 0.04);
+    transform: translateY(-3px);
+}
+
+.instrument-card:not(.locked):active {
+    transform: translateY(0) scale(0.99);
+}
+
+.card-glow {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    box-shadow: 0 0 0 0 var(--primary);
+    transition: box-shadow 0.3s;
+    pointer-events: none;
+}
+
+.instrument-card:not(.locked):hover .card-glow {
+    box-shadow: 0 0 40px -10px rgba(0, 243, 255, 0.35);
+}
+
+.card-badge {
+    font-family: var(--font-display);
+    font-size: 0.62rem;
+    color: var(--secondary);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+}
+
+.card-name {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    letter-spacing: 4px;
+    color: var(--primary);
+    text-shadow: 0 0 18px rgba(0, 243, 255, 0.2);
+    margin-bottom: 16px;
+}
+
+.card-desc {
+    font-family: var(--font-ui);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.55);
+    flex: 1;
+    margin-bottom: 24px;
+}
+
+.card-action {
+    font-family: var(--font-display);
+    font-size: 0.8rem;
+    letter-spacing: 2px;
+    color: var(--primary);
+    border: 1px solid rgba(0, 243, 255, 0.35);
+    padding: 8px 20px;
+    border-radius: 4px;
+    display: inline-block;
+    width: fit-content;
+    transition: 0.2s;
+}
+
+.instrument-card:not(.locked):hover .card-action {
+    background: var(--primary);
+    color: #000;
+    box-shadow: 0 0 16px rgba(0, 243, 255, 0.4);
+}
+
+/* Locked / coming soon */
+.instrument-card.locked {
+    border-color: rgba(255, 255, 255, 0.06);
+    cursor: default;
+}
+
+.locked-badge { color: rgba(255, 255, 255, 0.25); }
+.locked-name  { color: rgba(255, 255, 255, 0.15); text-shadow: none; }
+.locked-action {
+    color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.1);
+    letter-spacing: 3px;
+}
+.instrument-card.locked .card-desc { color: rgba(255, 255, 255, 0.2); }
+
+/* ===== FOOTER ===== */
+.hub-footer {
+    padding: 20px 40px;
+    text-align: center;
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.18);
+    letter-spacing: 1px;
+    flex-shrink: 0;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 600px) {
+    .hub-header {
+        padding: 16px 18px 14px;
+        gap: 14px;
+        flex-wrap: wrap;
+    }
+
+    .hub-title {
+        font-size: clamp(0.9rem, 4.5vw, 1.2rem);
+        letter-spacing: 2px;
+    }
+
+    .title-break { display: inline; }
+
+    .hub-main { padding: 20px 18px 30px; }
+
+    .tagline {
+        font-size: 0.72rem;
+        letter-spacing: 2px;
+        margin-bottom: 30px;
+    }
+
+    .instruments-grid {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+
+    .instrument-card { padding: 24px 20px; min-height: auto; }
+    .card-name { font-size: 1.5rem; }
+}
