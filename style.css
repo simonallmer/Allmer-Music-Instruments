@@ -95,6 +95,26 @@ body {
     text-transform: uppercase;
     margin-bottom: 48px;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.tagline-logo-link {
+    display: inline-flex;
+    align-items: center;
+    opacity: 0.45;
+    transition: opacity 0.2s;
+}
+
+.tagline-logo-link:hover { opacity: 0.85; }
+
+.tagline-logo {
+    height: 18px;
+    width: auto;
+    display: block;
 }
 
 /* ===== INSTRUMENT GRID ===== */
