@@ -92,6 +92,11 @@ document.addEventListener('DOMContentLoaded', () => {
         overlay.classList.add('hidden');
     });
 
+    // Skip overlay if ?play=1 (linked from instruments hub)
+    if (new URLSearchParams(window.location.search).get('play') === '1') {
+        initAudio().then(() => overlay.classList.add('hidden'));
+    }
+
     // Controls modal
     const controlsBtn = document.getElementById('controls-btn');
     const controlsOverlay = document.getElementById('controls-overlay');
