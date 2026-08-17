@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Beat Racer</title>
+<title>Beat Race</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <style>
   :root{ --ink:#dfeaf2; --dim:#7f97a8; --panel:rgba(6,13,20,.66); --line:rgba(127,151,168,.20);
@@ -146,15 +146,16 @@
 </div>
 
 <div id="gate">
-  <h2>Beat Racer</h2>
+  <h2>Beat Race</h2>
   <div class="track">Track 01 — Atlantica</div>
   <p>Five frets, one instrument. The lanes are five notes of the same lead voice — a run of orbs is a <b>riff</b>, not a list. The band plays the floor; you play the line over it.</p>
   <p><b>The big orbs are the ones that matter.</b> Every phrase opens on an accent: it hits harder, it rings an octave up, and the whole mix flinches underneath it. The small ones are the body of the phrase, the tiny ones are ghosts. Miss the accents and there is no song.</p>
   <p>The rests are part of it. Notes come in figures with silence between them — that silence is what makes the next accent land.</p>
+  <p><b>Barriers sit in the gaps.</b> They only ever appear where there are no notes, so jumping never costs you a note — but clip one and you drop a gear and slow down. Your streak survives; your speed doesn't.</p>
   <p>Chain notes to build your <b>streak</b>. Eight links steps the multiplier, and every eight after that; the tempo shifts with it and the chart subdivides behind it. A miss takes it all back to ×1.</p>
   <div class="keys">
     <b>&larr; &rarr;</b><span>change lane — snaps to the 8th · at a junction, press outward to take the fork</span>
-    <b>&uarr;</b><span>jump — clears gates · pitch up in melody (again at the top = octave)</span>
+    <b>&uarr;</b><span><b>jump</b> — clears barriers and gates · pitch up in melody (again at the top = octave)</span>
     <b>&darr;</b><span>pitch down in melody (again at the bottom = octave)</span>
     <b>SPACE</b><span><b>switch layer</b> — frets &rlarr; melody. Lands on the next bar.</span>
     <b>R</b><span><b>autoride</b> — it plays the line perfectly. Any arrow takes the wheel back.</span>
@@ -167,7 +168,7 @@
 "use strict";
 
 /* ══════════════════════════════════════════════════════════════════════════
-   BEAT RACER — playable slice
+   BEAT RACE — playable slice
    Built on the verified Look Test 01 renderer.
 
    ARCHITECTURE, non-negotiable: the audio clock is the master clock.
@@ -960,6 +961,57 @@ function densify(evs, tier){
   return out;
 }
 
+/* ── HURDLES ────────────────────────────────────────────────────────────
+   Something to do in the rests.
+
+   The chart is built from figures with silence between them, and that silence
+   is load-bearing — it is what makes the next accent land. But it also meant
+   the hands had nothing to do for a beat and a half at a time. A hurdle fills
+   that hole with a MOVEMENT beat rather than a musical one: a low barrier
+   across the whole deck that you jump.
+
+   It is placed, never authored. The chart says where the notes are; hurdles go
+   wherever the notes are NOT, which means they can never fight the line and
+   they automatically thin out as density climbs with the gears. Chart and
+   obstacle stay in sync by construction instead of by hand.
+
+   Rules that keep them fair:
+     · only in a gap of >= MIN_GAP beats between consecutive notes
+     · at least CLEAR_OF beats from any note, so the jump is its own action and
+       never a choice between jumping and catching
+     · snapped to the 8th grid like everything else
+     · never in a melody section — there you are flying, and the same gesture
+       is the octave                                                          */
+/* Tuned from the chart, not guessed. Measured gap distribution across all eight
+   patterns: the largest rest anywhere is 2.0 beats and most sparse sections top
+   out at 1.5, so a 1.75 threshold placed exactly zero hurdles. At 1.25 the
+   sparse sections get one or two per two bars and the CHORUS GETS NONE — its
+   largest gap is 1.0 — which is the property worth having: hurdles fill the
+   quiet sections and disappear where the notes are already dense, without any
+   rule saying so. */
+const HURDLE_MIN_GAP = 1.25;    // beats of rest needed before one appears
+const HURDLE_CLEAR_OF = 0.5;    // keep this far from any note
+
+function placeHurdles(ent, from, to){
+  if(ent.kind === 'melody') return;
+  const notes = [];
+  for(const e of EVENTS){
+    if(e.beat < from || e.beat >= to) continue;
+    if(e.t === 'flow' || e.t === 'haz' || e.t === 'jump') notes.push(e.beat);
+  }
+  notes.sort((a,b)=>a-b);
+  if(notes.length < 2) return;
+  for(let i=1;i<notes.length;i++){
+    const gap = notes[i] - notes[i-1];
+    if(gap < HURDLE_MIN_GAP) continue;
+    let at = (notes[i-1] + notes[i]) / 2;
+    at = Math.round(at*2)/2;                                   // onto the 8th
+    if(at - notes[i-1] < HURDLE_CLEAR_OF) continue;
+    if(notes[i] - at < HURDLE_CLEAR_OF) continue;
+    EVENTS.push({ beat: at, lane:-1, t:'hurdle', acc:1, done:false });
+  }
+}
+
 function pushNode(key, choice){
   const n = NODES[key];
   const prev = ROUTE[ROUTE.length-1];
@@ -980,6 +1032,7 @@ function pushNode(key, choice){
       EVENTS.push({ beat: startBeat + rep*pat.bars*4 + e.s/4, lane:e.lane,
                     t: e.t || 'flow', acc: e.a === undefined ? 1 : e.a,
                     fill: !!e.fill, done:false });
+  placeHurdles(ent, startBeat, ent.endBeat);
   EVENTS.push({ beat: ent.junctionBeat, lane:-1, t:'junction', done:false, committed:false, ent });
   return ent;
 }
@@ -1648,6 +1701,12 @@ const Clock = {
     const t=this.ctx.currentTime;
     this.noise(t,0.05,2400,'bandpass',0.20);
     this.noise(t+0.055,0.05,2100,'bandpass',0.13); },
+  // A clean vault. Short upward air noise — cheap, but without it a successful
+  // jump is silent and reads as nothing having happened.
+  whoosh(){ if(!this.started) return;
+    const t=this.ctx.currentTime;
+    this.noise(t, 0.16, 1400, 'bandpass', 0.13);
+    this.tone(t, 340, 'sine', 0.01, 0.16, 0.05, 3000); },
   thud(){ if(!this.started) return;
     const t=this.ctx.currentTime, o=this.ctx.createOscillator(), g=this.env(t,0.005,0.45,0.8);
     o.type='square'; o.frequency.setValueAtTime(90,t);
@@ -1786,9 +1845,9 @@ const Game = {
   autoStep(beat){
     if(!this.auto || this.dead || this.down() || Clock.paused) return;
 
-    // Gates span every lane, so they are jumped rather than dodged.
+    // Gates and hurdles span every lane, so they are jumped rather than dodged.
     for(const e of EVENTS){
-      if(e.done || e.t !== 'jump') continue;
+      if(e.done || (e.t !== 'jump' && e.t !== 'hurdle')) continue;
       const d = e.beat - beat;
       if(d > 0 && d < 0.30 && !this.jumping(beat)){ this.jump(); break; }
     }
@@ -1844,6 +1903,27 @@ const Game = {
   // press, but the Saige is still easing across — using the logical lane hits
   // you for a lane you have not visibly reached yet.
   hitLane(){ return Math.max(0, Math.min(LANES-1, Math.round(this.laneVis))); },
+
+  /* CLIPPING A HURDLE — you slow down, and nothing else.
+     In this game speed IS tempo ("MPH = BPM"), so the honest way to slow the
+     player down is to drop a gear. It is also the only one that is visible:
+     `lead` is written all over this file but nothing has READ it since the
+     rivals were removed, so a lead penalty would have been a number changing in
+     memory and nothing else.
+
+     Deliberately lighter than hit(): a hurdle costs a GEAR but NOT the streak.
+     You did not play anything wrong — you tripped over something — and taking
+     the multiplier for a movement mistake would punish the music for a mistake
+     that was not musical. */
+  clip(){
+    const b = Clock.songBeat();
+    if(b < this.invulnUntil) return;
+    this.invulnUntil = b + 1.2;
+    this.shake = Math.max(this.shake, 0.85);
+    Clock.setGear(Clock.gear - 1);
+    Clock.thud();
+    judge('CLIPPED  ▼ GEAR', '#e8642a');
+  },
   timbreHit:{f0:0,f1:0,f2:0,f3:0,f4:0},
   /* ── THE PUNCH ────────────────────────────────────────────────────
      A caught note has to be an EVENT, and the old version made every one of
@@ -2153,6 +2233,10 @@ function frame(now){
     } else if(e.t === 'jump'){
       // spans every lane, so no lane test — but it must be visibly a wall
       if(!Game.jumping(beat)) Game.hit('HIT — GATE');
+      e.done = true;
+    } else if(e.t === 'hurdle'){
+      if(!Game.jumping(beat)) Game.clip();
+      else { e.cleared = true; Clock.whoosh(); }
       e.done = true;
     }
   }
@@ -2479,6 +2563,20 @@ function frame(now){
          halo around it, and it wrecked the silhouette. Size and glow already
          separate the three tiers cleanly at distance — measured on screen — so
          the ring was cost without signal. */
+    } else if(e.t === 'hurdle'){
+      /* A low bar across the whole road. Drawn exactly as wide as it hits
+         (fairness rule 1), so it takes the local road width — narrower on a
+         three-lane side street. Low and solid rather than tall and framed, so
+         it never reads as something you might steer around: the answer is up. */
+      const hhw = deckHalfW(e.beat);
+      const nearh = Math.max(0, 1 - Math.abs(dz)/150);
+      pushInst(MESH_BOX, ex, baseY+0.52, z, hhw+0.6, 0.34, 0.42,
+               0.10,0.07,0.07, 0,0, 0);
+      pushInst(MESH_BOX, ex, baseY+0.88, z, hhw+0.6, 0.07, 0.30,
+               0.95,0.42,0.16, 0,0, 0.55 + 0.45*nearh);
+      for(let k=-2;k<=2;k++)                      // hazard stripes
+        pushInst(MESH_BOX, ex + k*(hhw*0.42), baseY+0.52, z+0.05, 0.22, 0.30, 0.10,
+                 0.96,0.72,0.20, 0,0, 0.30 + 0.30*nearh);
     } else if(e.t === 'jump'){
       /* A gate hits you in EVERY lane, so it must be unmissable. It used to be
          two thin posts at the outer edges — nothing in your lane, nothing across
