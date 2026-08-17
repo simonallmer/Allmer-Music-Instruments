@@ -1,0 +1,2537 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Beat Racer</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<style>
+  :root{ --ink:#dfeaf2; --dim:#7f97a8; --panel:rgba(6,13,20,.66); --line:rgba(127,151,168,.20);
+         --day:#f5a93c; --night:#4fd4e4; }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:#060d14;overflow:hidden;touch-action:none;
+    font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);
+    user-select:none;-webkit-user-select:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+
+  /* ── the mix IS the score readout ───────────────────────────────────── */
+  #mix{position:fixed;left:14px;top:50%;transform:translateY(-50%);z-index:10;
+    display:flex;flex-direction:column;gap:7px}
+  .stem{display:flex;align-items:center;gap:8px}
+  .stem .nm{width:40px;font-size:9px;letter-spacing:.13em;color:var(--dim);text-align:right}
+  .stem .tr{position:relative;width:74px;height:5px;border-radius:3px;
+    background:rgba(127,151,168,.16);overflow:hidden}
+  .stem .fl{position:absolute;inset:0 auto 0 0;width:0%;border-radius:3px;background:var(--night)}
+  .stem .rv{position:absolute;inset:0 auto 0 0;width:0%;border-radius:3px;opacity:.5}
+  .stem.latched .nm{color:var(--ink)}
+  .stem.here .nm{color:#fff}
+  .stem.drums .fl{background:var(--day)}
+
+  #hud{position:fixed;top:14px;right:14px;text-align:right;z-index:10;
+    font-variant-numeric:tabular-nums}
+  #hud .big{font-size:30px;line-height:1;letter-spacing:.01em}
+  #hud .lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-top:2px}
+  #hud .gear{margin-top:10px;font-size:11px;letter-spacing:.1em;color:var(--dim)}
+  #hud .gear b{color:var(--ink);font-weight:400}
+  #beats{display:flex;gap:4px;justify-content:flex-end;margin-top:9px}
+  #beats i{width:6px;height:6px;border-radius:50%;background:rgba(127,151,168,.22)}
+
+  #flow{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:10;text-align:center;
+    opacity:0;transition:opacity .18s}
+  #flow.on{opacity:1}
+  #flow .n{font-size:26px;line-height:1;color:var(--night)}
+  #flow .l{font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
+
+  /* THE MULTIPLIER. Guitar Hero's real scoreboard: not a number that ticks up,
+     but a step change you can hear arriving. Big, centred under the streak. */
+  #mult{position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:10;
+    text-align:center;font-variant-numeric:tabular-nums;
+    opacity:0;transition:opacity .2s}
+  #mult.on{opacity:1}
+  #mult .x{font-size:38px;line-height:1;color:var(--day);
+    text-shadow:0 0 22px rgba(245,169,60,.55);display:block}
+  #mult .l{font-size:8px;letter-spacing:.24em;text-transform:uppercase;color:var(--dim);margin-top:3px}
+  #mult.bump .x{animation:multbump .28s ease-out}
+  @keyframes multbump{0%{transform:scale(1.55);color:#fff}100%{transform:scale(1)}}
+
+  #judge{position:fixed;left:50%;top:62%;transform:translateX(-50%);z-index:10;
+    font-size:11px;letter-spacing:.24em;text-transform:uppercase;opacity:0;pointer-events:none}
+  #judge.show{animation:jf .5s ease-out}
+  @keyframes jf{0%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-14px)}}
+
+  #sect{position:fixed;left:0;right:0;bottom:22px;text-align:center;z-index:10;
+    font-size:9px;letter-spacing:.28em;text-transform:uppercase;color:var(--dim)}
+
+  #gate{position:fixed;inset:0;z-index:20;display:grid;place-content:center;justify-items:center;
+    gap:16px;background:#060d14;text-align:center;padding:24px;cursor:pointer}
+  #gate h2{margin:0;font-size:15px;letter-spacing:.34em;text-transform:uppercase;font-weight:400}
+  #gate .track{font-size:10px;letter-spacing:.30em;text-transform:uppercase;color:var(--night);
+    margin:-6px 0 2px}
+  #gate .keys{display:grid;grid-template-columns:auto auto;gap:5px 14px;font-size:11px;
+    color:var(--dim);margin:4px 0 2px}
+  #gate .keys b{color:var(--ink);font-weight:400;text-align:right}
+  #gate p{margin:0;max-width:38ch;font-size:11px;color:var(--dim);line-height:1.65}
+  #gate .k{border:1px solid var(--line);border-radius:6px;padding:9px 22px;font-size:10px;
+    letter-spacing:.22em;text-transform:uppercase;margin-top:4px}
+  #gate.hide{display:none}
+
+  #pausebtn{position:fixed;top:14px;left:14px;z-index:12;width:32px;height:32px;
+    display:grid;place-content:center;border:1px solid var(--line);border-radius:7px;
+    background:var(--panel);backdrop-filter:blur(12px);color:var(--dim);
+    font-size:10px;letter-spacing:1px;cursor:pointer}
+  #pausebtn:hover{color:var(--ink)}
+
+  #pause{position:fixed;inset:0;z-index:15;display:none;place-content:center;justify-items:center;
+    background:rgba(6,13,20,.74);backdrop-filter:blur(7px);cursor:pointer;text-align:center}
+  #pause.on{display:grid}
+  #pause .box{display:grid;justify-items:center;gap:12px;padding:26px 34px}
+  #pause h3{margin:0;font-size:13px;letter-spacing:.34em;text-transform:uppercase;font-weight:400}
+  #pause p{margin:0;max-width:34ch;font-size:11px;color:var(--dim);line-height:1.6}
+  #pause .k{border:1px solid var(--line);border-radius:6px;padding:9px 22px;font-size:10px;
+    letter-spacing:.22em;text-transform:uppercase}
+  #pause .hint{font-size:9px;letter-spacing:.18em;color:var(--dim)}
+  #pause .vol{display:flex;align-items:center;gap:10px;margin:4px 0 2px;cursor:default}
+  #pause .vol label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);width:44px;text-align:right}
+  #pause .vol span{font-size:10px;color:var(--ink);width:26px;text-align:left;font-variant-numeric:tabular-nums}
+  #pause .vol input[type=range]{width:160px;height:2px;-webkit-appearance:none;appearance:none;
+    background:var(--line);border-radius:2px;outline:none;cursor:pointer}
+  #pause .vol input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+    border-radius:50%;background:var(--ink);cursor:pointer}
+  #pause .vol input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;
+    background:var(--ink);cursor:pointer}
+
+  /* AUTORIDE badge. Deliberately obvious — a demo mode that is not clearly
+     signposted reads as the controls having stopped working. */
+  #auto{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:11;
+    display:none;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;
+    border:1px solid rgba(245,169,60,.55);background:rgba(6,13,20,.72);
+    backdrop-filter:blur(10px);
+    font-size:9px;letter-spacing:.26em;text-transform:uppercase;color:var(--day)}
+  #auto.on{display:flex}
+  #auto i{width:6px;height:6px;border-radius:50%;background:var(--day);
+    animation:autopulse 1.1s ease-in-out infinite}
+  @keyframes autopulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+  @media (max-width:640px){ #mix{left:8px;gap:5px} .stem .tr{width:52px} .stem .nm{width:34px}
+    #pausebtn{top:auto;bottom:14px;left:14px} }
+</style>
+
+<canvas id="c"></canvas>
+
+<div id="mix"></div>
+
+<div id="hud">
+  <div class="big" id="bpm">124</div>
+  <div class="lbl">bpm</div>
+  <div class="gear">gear <b id="gear">2</b>/4 &nbsp;·&nbsp; <b id="subdiv">8ths</b></div>
+  <div id="beats"><i></i><i></i><i></i><i></i></div>
+</div>
+
+<div id="flow"><div class="n" id="flowN">0</div><div class="l">flow</div></div>
+<div id="mult"><div class="x">×1</div><div class="l">multiplier</div></div>
+<div id="auto"><i></i>Autoride &nbsp;·&nbsp; arrow key to take over</div>
+<div id="judge"></div>
+<div id="sect"></div>
+<div id="pausebtn" title="Pause (Esc)">❙❙</div>
+
+<div id="pause">
+  <div class="box">
+    <h3>Paused</h3>
+    <p>The audio clock is frozen. Nothing drifts while you're away.</p>
+    <div class="vol">
+      <label for="vol">Music</label>
+      <input id="vol" type="range" min="0" max="100" step="1" value="80">
+      <span id="vol_v">80</span>
+    </div>
+    <div class="k">Resume</div>
+    <div class="hint">Esc or P &nbsp;·&nbsp; M to mute</div>
+  </div>
+</div>
+
+<div id="gate">
+  <h2>Beat Racer</h2>
+  <div class="track">Track 01 — Atlantica</div>
+  <p>Five frets, one instrument. The lanes are five notes of the same lead voice — a run of orbs is a <b>riff</b>, not a list. The band plays the floor; you play the line over it.</p>
+  <p><b>The big orbs are the ones that matter.</b> Every phrase opens on an accent: it hits harder, it rings an octave up, and the whole mix flinches underneath it. The small ones are the body of the phrase, the tiny ones are ghosts. Miss the accents and there is no song.</p>
+  <p>The rests are part of it. Notes come in figures with silence between them — that silence is what makes the next accent land.</p>
+  <p>Chain notes to build your <b>streak</b>. Eight links steps the multiplier, and every eight after that; the tempo shifts with it and the chart subdivides behind it. A miss takes it all back to ×1.</p>
+  <div class="keys">
+    <b>&larr; &rarr;</b><span>change lane — snaps to the 8th · at a junction, press outward to take the fork</span>
+    <b>&uarr;</b><span>jump — clears gates · pitch up in melody (again at the top = octave)</span>
+    <b>&darr;</b><span>pitch down in melody (again at the bottom = octave)</span>
+    <b>SPACE</b><span><b>switch layer</b> — frets &rlarr; melody. Lands on the next bar.</span>
+    <b>R</b><span><b>autoride</b> — it plays the line perfectly. Any arrow takes the wheel back.</span>
+  </div>
+  <p>On a phone: swipe left/right to move, up to jump, tap to switch layer.</p>
+  <div class="k">Click to start</div>
+</div>
+
+<script>
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BEAT RACER — playable slice
+   Built on the verified Look Test 01 renderer.
+
+   ARCHITECTURE, non-negotiable: the audio clock is the master clock.
+   Nothing integrates dt. World scroll, object positions, the player's own
+   position in the song — all are pure functions of AudioContext.currentTime
+   via songBeat(). A dropped frame costs a frame of animation, never a beat,
+   and tempo changes stay exact because beats (not seconds) address the chart.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── constants ─────────────────────────────────────────────────────────── */
+const LANES = 5, LANE_W = 3.4;
+const UPB = 20;                    // world units travelled per beat  → MPH = BPM
+const PLAYER_Z = -15;              // player's fixed z; the world comes to them
+// The track is ALWAYS above water. Swell is scenery below the deck, never on it.
+// Max wave height is ~5.5 * amp, and amp is capped below, so 4.6 clears it.
+const DECK_Y = 4.6;
+// House tempos. The old top gear (170) is not four-to-the-floor any more, it is
+// hard techno — the kick stops swinging and starts machine-gunning.
+const GEARS = [120, 126, 134, 146];
+const CURVE_W = 27;                // lateral offset a branch moves the centreline
+const JUNC_LEAD = 16;              // beats between committing a branch and riding it
+const laneX = l => (l - 2) * LANE_W;
+
+/* ── tiny mat4 ─────────────────────────────────────────────────────────── */
+const M4 = {
+  persp(fovy, asp, n, f){ const t = 1/Math.tan(fovy/2), nf = 1/(n-f);
+    return new Float32Array([t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)*nf,-1, 0,0,2*f*n*nf,0]); },
+  lookAt(eye, ctr, up){
+    let zx=eye[0]-ctr[0], zy=eye[1]-ctr[1], zz=eye[2]-ctr[2];
+    let l=Math.hypot(zx,zy,zz)||1; zx/=l; zy/=l; zz/=l;
+    let xx=up[1]*zz-up[2]*zy, xy=up[2]*zx-up[0]*zz, xz=up[0]*zy-up[1]*zx;
+    l=Math.hypot(xx,xy,xz)||1; xx/=l; xy/=l; xz/=l;
+    const yx=zy*xz-zz*xy, yy=zz*xx-zx*xz, yz=zx*xy-zy*xx;
+    return new Float32Array([xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0,
+      -(xx*eye[0]+xy*eye[1]+xz*eye[2]), -(yx*eye[0]+yy*eye[1]+yz*eye[2]),
+      -(zx*eye[0]+zy*eye[1]+zz*eye[2]), 1]); },
+  mul(a,b){ const o=new Float32Array(16);
+    for(let c=0;c<4;c++) for(let r=0;r<4;r++){ let s=0;
+      for(let k=0;k<4;k++) s+=a[k*4+r]*b[c*4+k]; o[c*4+r]=s; } return o; }
+};
+
+/* ── GL bootstrap ──────────────────────────────────────────────────────── */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', {antialias:false, alpha:false, depth:true, powerPreference:'high-performance'});
+if(!gl){ document.getElementById('gate').innerHTML =
+  '<h2>WebGL2 required</h2><p>Try a current Chrome, Safari or Firefox.</p>'; throw new Error('no webgl2'); }
+
+function sh(t, src){ const s=gl.createShader(t); gl.shaderSource(s, src.trim()); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(s), src.trim().split('\n').map((l,i)=>(i+1)+' '+l).join('\n'));
+    throw new Error('shader compile'); } return s; }
+function prog(vs, fs){ const p=gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){ console.error(gl.getProgramInfoLog(p)); throw new Error('link'); }
+  const u={}, n=gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for(let i=0;i<n;i++){ const nm=gl.getActiveUniform(p,i).name.replace(/\[0\]$/,'');
+    u[nm]=gl.getUniformLocation(p,nm); } return {p,u}; }
+
+const NOISE = `
+float hash21(vec2 p){ p = fract(p*vec2(123.34, 345.45)); p += dot(p, p+34.345); return fract(p.x*p.y); }
+float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+  return mix(mix(hash21(i), hash21(i+vec2(1,0)), u.x),
+             mix(hash21(i+vec2(0,1)), hash21(i+vec2(1,1)), u.x), u.y); }
+float fbm(vec2 p){ float a=0.5,s=0.0; for(int i=0;i<5;i++){ s+=a*vnoise(p); p*=2.03; p+=11.7; a*=0.5; } return s; }
+float fbm2(vec2 p){ return 0.5*vnoise(p) + 0.25*vnoise(p*2.03 + 11.7); }
+float washStep(float x, float steps, float soft){ float sc=x*steps, i=floor(sc), f=fract(sc);
+  return (i + smoothstep(0.5-soft, 0.5+soft, f)) / steps; }
+`;
+
+/* ── wave field (must stay identical to the JS mirror below) ───────────── */
+const WAVE_GLSL = `
+const vec4 W0 = vec4( 0.34779, 0.93750, 64.0, 3.10);
+const vec4 W1 = vec4( 0.42272,-0.90625, 32.0, 1.55);
+const vec4 W2 = vec4(-0.51134, 0.85938, 16.0, 0.62);
+const vec4 W3 = vec4( 0.42272, 0.90625,  8.0, 0.23);
+const vec4 OMEGA = vec4(0.7853982, 1.5707963, 2.3561945, 3.9269908);
+const vec4 SHARP = vec4(1.55, 1.32, 1.12, 1.00);
+float waveH(vec2 p, float t, float amp){
+  vec4 ws[4]; ws[0]=W0; ws[1]=W1; ws[2]=W2; ws[3]=W3;
+  float h = 0.0;
+  for(int i=0;i<4;i++){
+    float k = 6.2831853 / ws[i].z;
+    float ph = k*dot(ws[i].xy, p) - OMEGA[i]*t;
+    // max() is load-bearing: pow(x,y) is UNDEFINED for x<0 and returns NaN.
+    float s = pow(max(sin(ph)*0.5 + 0.5, 0.0), SHARP[i]);
+    h += ws[i].w * amp * (s*2.0 - 1.0);
+  }
+  return h;
+}`;
+
+// JS mirror. Any edit to WAVE_GLSL must be made here too or the Saige will
+// float above / sink into the water it is supposed to be riding.
+const WAVES = [
+  {dx: 0.34779, dy: 0.93750, len:64, amp:3.10, om:0.7853982, sh:1.55},
+  {dx: 0.42272, dy:-0.90625, len:32, amp:1.55, om:1.5707963, sh:1.32},
+  {dx:-0.51134, dy: 0.85938, len:16, amp:0.62, om:2.3561945, sh:1.12},
+  {dx: 0.42272, dy: 0.90625, len: 8, amp:0.23, om:3.9269908, sh:1.00}
+];
+function waveH(x, z, t, amp){
+  let h = 0;
+  for(const w of WAVES){
+    const k = 6.2831853 / w.len;
+    const ph = k*(w.dx*x + w.dy*z) - w.om*t;
+    const s = Math.pow(Math.max(Math.sin(ph)*0.5 + 0.5, 0), w.sh);
+    h += w.amp * amp * (s*2 - 1);
+  }
+  return h;
+}
+
+/* ── palette ───────────────────────────────────────────────────────────── */
+const PAL = {
+  night:{ zenith:[0.031,0.055,0.106], mid:[0.055,0.145,0.231], horizon:[0.208,0.372,0.451],
+          sun:[0.541,0.831,0.902], deep:[0.035,0.098,0.157], body:[0.078,0.243,0.333],
+          crest:[0.639,0.906,0.945], sunDir:[-0.35,0.28,-0.9], silh:[0.031,0.075,0.114] },
+  day:  { zenith:[0.169,0.086,0.263], mid:[0.522,0.192,0.376], horizon:[0.898,0.545,0.271],
+          sun:[1.000,0.780,0.451], deep:[0.184,0.100,0.239], body:[0.455,0.224,0.376],
+          crest:[0.988,0.827,0.706], sunDir:[0.30,0.20,-0.93], silh:[0.086,0.043,0.098] }
+};
+const mixArr = (a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t);
+
+/* ══ shaders ═══════════════════════════════════════════════════════════ */
+const fsTri = `#version 300 es
+const vec2 P[3] = vec2[3](vec2(-1.,-1.), vec2(3.,-1.), vec2(-1.,3.));
+out vec2 vUV;
+void main(){ vUV = P[gl_VertexID]*0.5+0.5; gl_Position = vec4(P[gl_VertexID], 0.999, 1.0); }`;
+
+const skyFS = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform vec3 uZenith, uMid, uHorizon, uSun;
+uniform vec2 uSunUV; uniform float uTime, uAspect;
+${NOISE}
+void main(){
+  float y = vUV.y;
+  vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.42, y));
+  col = mix(col, uZenith, smoothstep(0.34, 1.0, y));
+  vec2 sp = vec2(vUV.x*uAspect*2.1, y*3.4);
+  float cl = fbm(sp*1.5 + vec2(uTime*0.008, 0.0));
+  cl = smoothstep(0.42, 0.86, cl) * smoothstep(0.02, 0.30, y);
+  col = mix(col, mix(uMid, uSun, 0.45), cl*0.42);
+  float d = length((vUV - uSunUV) * vec2(uAspect, 1.0));
+  col += uSun * (0.30*exp(-d*3.4) + 0.14*exp(-d*10.0));
+  col = mix(col, uHorizon, smoothstep(0.10, 0.0, y));
+  fragColor = vec4(col, 1.0);
+}`;
+
+const oceanVS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aXZ;
+uniform mat4 uVP; uniform float uTime, uAmp, uTravel, uOriginX, uHwBase, uHwSlope;
+out vec3 vWorld; out vec3 vN; out float vH; out float vSlope;
+${WAVE_GLSL}
+/* THE OCEAN FOLLOWS THE CAMERA IN X. It did not, and that was a real bug:
+   the grid is built once around world x=0 with a near-field half-width of only
+   ~17 units, while a single branch fork walks the track centreline 27 units
+   sideways (three forks = 81). The camera drove off the edge of its own water,
+   which is why the sea tore up when you changed lane or took a fork.
+
+   uOriginX rides the track centreline, so the mesh is always centred under the
+   camera. The wave is still sampled at TRUE world x (aXZ.x + uOriginX), so the
+   water stays locked to the world and does not slide along with you — only the
+   tessellation moves. Sampling at aXZ.x alone would drag the whole sea
+   sideways with the camera, which looks like the boat is stationary and the
+   ocean is on rails. */
+/* aXZ.x is NORMALISED to [-1,1]; the real half-width is computed here, per
+   frame, from the live camera FOV and aspect. It used to be baked into the
+   buffer as 14 + |z|*1.05, and that slope corresponds to a 46.4-degree
+   half-angle — narrower than the 48.8 degrees a 60-degree FOV actually spans on
+   a 2:1 window, and it only gets worse as the window widens. The ocean was
+   therefore ALWAYS too narrow for the frustum: short by ~2 units at the near
+   row, ~11 at mid distance and ~42 at the far edge, which is the strip of bare
+   sky down each side of the screen. Deriving it from the camera means it cannot
+   be wrong at any aspect ratio.
+   NOTE: no backticks in here — this comment lives inside a JS template
+   literal, and one would end the shader string. */
+void main(){
+  float hw = uHwBase + abs(aXZ.y)*uHwSlope;
+  float wx = aXZ.x*hw + uOriginX;
+  vec2 p = vec2(wx, aXZ.y + uTravel);
+  float e = 0.6;
+  float h  = waveH(p,               uTime, uAmp);
+  float hx = waveH(p + vec2(e,0.0), uTime, uAmp);
+  float hz = waveH(p + vec2(0.0,e), uTime, uAmp);
+  float dhdx = (hx-h)/e, dhdz = (hz-h)/e;
+  vN = normalize(vec3(-dhdx, 1.0, -dhdz));
+  vSlope = length(vec2(dhdx, dhdz));
+  vWorld = vec3(wx, h, aXZ.y);
+  vH = h;
+  gl_Position = uVP * vec4(wx, h, aXZ.y, 1.0);
+}`;
+
+const oceanFS = `#version 300 es
+precision highp float;
+in vec3 vWorld; in vec3 vN; in float vH; in float vSlope;
+out vec4 fragColor;
+uniform vec3 uDeep, uBody, uCrest, uHorizonCol, uSunDir, uSunCol;
+uniform float uAmp, uBands, uTravel;
+${NOISE}
+void main(){
+  vec3 N = normalize(vN);
+  float hn = clamp(vH / max(uAmp*4.6, 0.001), -1.0, 1.0);
+  vec2 wp = vWorld.xz*0.11 + vec2(0.0, uTravel*0.11);
+  float grain = fbm(wp*2.4);
+  vec3 col = mix(uDeep, uBody, smoothstep(-0.75, 0.80, hn + (grain-0.5)*0.30));
+  float hi = smoothstep(0.44, 0.90, hn + (grain-0.5)*0.42);
+  float sl = smoothstep(0.30, 0.72, vSlope);
+  col = mix(col, uCrest, clamp(hi*sl, 0.0, 1.0)*0.88);
+  float ndl = dot(N, normalize(uSunDir))*0.5 + 0.5;
+  float lit = washStep(clamp(ndl,0.0,1.0), uBands, 0.28);
+  col *= mix(0.62, 1.20, lit);
+  col += uSunCol * lit * 0.045;
+  col = mix(col, uHorizonCol*0.85, 0.15*clamp(N.y, 0.0, 1.0));
+  float dist = -vWorld.z;
+  float fog = 1.0 - exp(-pow(max(dist,0.0)*0.0053, 1.78));
+  col = mix(col, uHorizonCol, clamp(fog, 0.0, 1.0));
+  fragColor = vec4(col, 1.0);
+}`;
+
+/* ── instanced flat-shaded objects: deck, pillars, hazards, orbs, Saige ── */
+const objVS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in vec3 iPos;
+layout(location=3) in vec3 iScale;
+layout(location=4) in vec3 iCol;
+layout(location=5) in vec2 iRot;    // x = pitch (wheelie), y = roll (lean)
+layout(location=6) in float iGlow;
+uniform mat4 uVP;
+out vec3 vN; out vec3 vCol; out float vGlow; out float vDist;
+void main(){
+  float cp=cos(iRot.x), sp=sin(iRot.x), cr=cos(iRot.y), sr=sin(iRot.y);
+  mat3 RX = mat3(1.,0.,0.,  0.,cp,sp,  0.,-sp,cp);
+  mat3 RZ = mat3(cr,sr,0., -sr,cr,0.,  0.,0.,1.);
+  mat3 R = RZ * RX;
+  vec3 wp = R * (aPos * iScale) + iPos;
+  vN = normalize(R * aNrm);
+  vCol = iCol; vGlow = iGlow; vDist = -wp.z;
+  gl_Position = uVP * vec4(wp, 1.0);
+}`;
+
+const objFS = `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vCol; in float vGlow; in float vDist;
+out vec4 fragColor;
+uniform vec3 uSunDir, uHorizonCol;
+uniform float uBands;
+${NOISE}
+void main(){
+  vec3 N = normalize(vN);
+  float ndl = dot(N, normalize(uSunDir))*0.5 + 0.5;
+  float lit = washStep(clamp(ndl,0.0,1.0), uBands, 0.30);
+  vec3 col = vCol * mix(0.52, 1.18, lit);
+  col = mix(col, vCol, vGlow);            // emissive objects ignore the light
+  col += vCol * vGlow * 0.55;
+  float fog = 1.0 - exp(-pow(max(vDist,0.0)*0.0053, 1.78));
+  col = mix(col, uHorizonCol, clamp(fog,0.0,1.0) * (1.0 - vGlow*0.55));
+  fragColor = vec4(col, 1.0);
+}`;
+
+const silhVS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aQuad;
+uniform mat4 uVP; uniform vec3 uPos; uniform vec2 uSize;
+out vec2 vUV;
+void main(){ vUV = aQuad*0.5+0.5;
+  vec3 w = uPos + vec3(aQuad.x*uSize.x*0.5, (aQuad.y*0.5+0.5)*uSize.y, 0.0);
+  gl_Position = uVP * vec4(w, 1.0); }`;
+
+const silhFS = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uTex; uniform vec3 uSilh, uHorizonCol; uniform float uFog;
+void main(){
+  float a = texture(uTex, vec2(vUV.x, 1.0-vUV.y)).a;
+  if(a < 0.02) discard;
+  vec3 col = mix(uSilh, uHorizonCol*0.82, uFog*0.86);
+  fragColor = vec4(col, a * (1.0 - uFog*0.42));
+}`;
+
+const postFS = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uColor, uDepth, uPaperTex;
+uniform vec2 uTexel, uPaperScale;
+uniform float uWet, uNear, uFar, uShake;
+${NOISE}
+float linDepth(vec2 uv){ float z = texture(uDepth, uv).r*2.0-1.0;
+  return (2.0*uNear*uFar) / (uFar + uNear - z*(uFar-uNear)); }
+void main(){
+  vec2 uv = vUV;
+  if(uShake > 0.001){                      // impact judder, screen space
+    uv += vec2(vnoise(vec2(uWet*90.0, 3.0))-0.5, vnoise(vec2(7.0, uWet*90.0))-0.5) * uShake * 0.03;
+  }
+  float wet = uWet;
+  vec2 px = uTexel;
+
+  // 1. BLEED — pigment migrating through wet paper. Low frequency by necessity:
+  //    high-frequency flow reads as digital noise, not as water in paper.
+  float n1 = vnoise(uv*4.0 + 3.1)*0.65 + vnoise(uv*9.0 + 1.3)*0.35;
+  float n2 = vnoise(uv*4.0 + 19.7)*0.65 + vnoise(uv*9.0 + 27.1)*0.35;
+  vec2 flow = (vec2(n1,n2) - 0.5) * 2.0;
+  float bleedR = 1.6 + wet*2.6;
+  vec3 col = texture(uColor, uv + flow*px*bleedR).rgb;
+  col = mix(col, texture(uColor, uv + flow*px*bleedR*2.7).rgb, 0.34);
+
+  // 2. EDGE POOLING — pigment concentrating where the wash stops
+  float wob = (vnoise(uv*22.0)-0.5)*2.4;
+  vec2 o = px * (1.0+wob) * 1.5;
+  float d0 = linDepth(uv), dE = 0.0;
+  dE = max(dE, abs(linDepth(uv+vec2(o.x,0.0))-d0));
+  dE = max(dE, abs(linDepth(uv-vec2(o.x,0.0))-d0));
+  dE = max(dE, abs(linDepth(uv+vec2(0.0,o.y))-d0));
+  dE = max(dE, abs(linDepth(uv-vec2(0.0,o.y))-d0));
+  float depthEdge = smoothstep(0.010, 0.075, dE/max(d0,1.0)) * exp(-d0*0.0055);
+  const vec3 L = vec3(0.299,0.587,0.114);
+  float l0 = dot(col, L), lE = 0.0;
+  lE = max(lE, abs(dot(texture(uColor, uv+vec2(o.x,0.0)).rgb, L) - l0));
+  lE = max(lE, abs(dot(texture(uColor, uv+vec2(0.0,o.y)).rgb, L) - l0));
+  float edge = clamp(max(depthEdge, smoothstep(0.045,0.30,lE)*0.75), 0.0, 1.0) * (0.55 + wet*0.65);
+  col *= 1.0 - edge*0.55;
+  col = mix(col, col*vec3(0.86,0.94,1.06), edge*0.5);
+
+  // 3. PAPER — screen space, static. The paper never moves; the painting does.
+  float grain = texture(uPaperTex, vUV*uPaperScale).r;
+  float cockle = fbm2(vUV*vec2(4.5,2.8));
+  float tooth = (grain-0.5)*0.15 + (cockle-0.5)*0.075;
+  float lum = dot(col, L);
+  float gran = 1.0 - abs(lum-0.42)*2.0;
+  col *= 1.0 + tooth*(0.55 + clamp(gran,0.0,1.0)*0.9);
+
+  col = mix(col, col*vec3(1.03,1.0,0.97), 0.5);
+  col += vec3(0.012,0.020,0.030)*wet;
+  col *= 1.0 - smoothstep(0.42,0.98,length(vUV-0.5))*0.42;
+  fragColor = vec4(max(col,0.0), 1.0);
+}`;
+
+const P_sky   = prog(fsTri, skyFS);
+const P_ocean = prog(oceanVS, oceanFS);
+const P_obj   = prog(objVS, objFS);
+const P_silh  = prog(silhVS, silhFS);
+const P_post  = prog(fsTri, postFS);
+
+/* ── ocean projected grid ──────────────────────────────────────────────── */
+const GW=200, GD=150, ZN=3, ZF=430;
+const overts = new Float32Array((GW+1)*(GD+1)*2);
+/* x is stored NORMALISED (-1..1) and scaled in the vertex shader, so the sheet
+   can be re-fitted to the camera every frame without touching the buffer. */
+{ let k=0;
+  for(let j=0;j<=GD;j++){ const t=j/GD;
+    const z = -(ZN + (ZF-ZN)*Math.pow(t,2.15));
+    for(let i=0;i<=GW;i++){ overts[k++]=(i/GW*2-1); overts[k++]=z; } } }
+const oidx = new Uint32Array(GW*GD*6);
+{ let k=0;
+  for(let j=0;j<GD;j++) for(let i=0;i<GW;i++){
+    const a=j*(GW+1)+i, b=a+1, c=a+(GW+1), d=c+1;
+    oidx[k++]=a; oidx[k++]=c; oidx[k++]=b; oidx[k++]=b; oidx[k++]=c; oidx[k++]=d; } }
+const vaoOcean = gl.createVertexArray();
+gl.bindVertexArray(vaoOcean);
+const vboO = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vboO);
+gl.bufferData(gl.ARRAY_BUFFER, overts, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+const iboO = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, iboO);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, oidx, gl.STATIC_DRAW);
+gl.bindVertexArray(null);
+
+const vaoQuad = gl.createVertexArray(); gl.bindVertexArray(vaoQuad);
+const vboQ = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vboQ);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+gl.bindVertexArray(null);
+const vaoEmpty = gl.createVertexArray();
+
+/* ── instanced mesh helper ─────────────────────────────────────────────── */
+const INST_FLOATS = 12;                                   // pos3 scale3 col3 rot2 glow1
+function makeMesh(pos, nrm, idxArr, maxInst){
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
+  const nb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, nb);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(nrm), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,3,gl.FLOAT,false,0,0);
+  const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idxArr), gl.STATIC_DRAW);
+  const inb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, inb);
+  gl.bufferData(gl.ARRAY_BUFFER, maxInst*INST_FLOATS*4, gl.DYNAMIC_DRAW);
+  const S = INST_FLOATS*4;
+  const at = [[2,3,0],[3,3,12],[4,3,24],[5,2,36],[6,1,44]];
+  for(const [loc,size,off] of at){
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, S, off);
+    gl.vertexAttribDivisor(loc, 1);
+  }
+  gl.bindVertexArray(null);
+  return { vao, inb, count: idxArr.length, data: new Float32Array(maxInst*INST_FLOATS),
+           n: 0, max: maxInst };
+}
+function pushInst(m, x,y,z, sx,sy,sz, r,g,b, pitch,roll, glow){
+  if(m.n >= m.max) return;
+  const d = m.data, o = m.n*INST_FLOATS;
+  d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=sx; d[o+4]=sy; d[o+5]=sz;
+  d[o+6]=r; d[o+7]=g; d[o+8]=b; d[o+9]=pitch; d[o+10]=roll; d[o+11]=glow;
+  m.n++;
+}
+function drawMesh(m){
+  if(!m.n) return;
+  gl.bindVertexArray(m.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, m.inb);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, m.data, 0, m.n*INST_FLOATS);
+  gl.drawElementsInstanced(gl.TRIANGLES, m.count, gl.UNSIGNED_SHORT, 0, m.n);
+  m.n = 0;
+}
+
+function boxGeo(){
+  const p=[], n=[], id=[];
+  const F=[[[ 0, 0, 1],[-1,-1,1, 1,-1,1, 1,1,1, -1,1,1]],
+           [[ 0, 0,-1],[1,-1,-1, -1,-1,-1, -1,1,-1, 1,1,-1]],
+           [[ 1, 0, 0],[1,-1,1, 1,-1,-1, 1,1,-1, 1,1,1]],
+           [[-1, 0, 0],[-1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1]],
+           [[ 0, 1, 0],[-1,1,1, 1,1,1, 1,1,-1, -1,1,-1]],
+           [[ 0,-1, 0],[-1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1]]];
+  for(const [nr,v] of F){ const b=p.length/3;
+    for(let i=0;i<4;i++){ p.push(v[i*3],v[i*3+1],v[i*3+2]); n.push(nr[0],nr[1],nr[2]); }
+    id.push(b,b+1,b+2, b,b+2,b+3); }
+  return [p,n,id];
+}
+function sphereGeo(seg=10, rings=7){
+  const p=[], n=[], id=[];
+  for(let r=0;r<=rings;r++){ const phi=r/rings*Math.PI;
+    for(let s=0;s<=seg;s++){ const th=s/seg*Math.PI*2;
+      const x=Math.sin(phi)*Math.cos(th), y=Math.cos(phi), z=Math.sin(phi)*Math.sin(th);
+      p.push(x,y,z); n.push(x,y,z); } }
+  for(let r=0;r<rings;r++) for(let s=0;s<seg;s++){
+    const a=r*(seg+1)+s, b=a+seg+1;
+    id.push(a,b,a+1, a+1,b,b+1); }
+  return [p,n,id];
+}
+// Torus with its axis along X, so rotating about X rolls it forward.
+// This is the Saige wheel: a luminous ring, not a solid sphere.
+function torusGeo(R=1, r=0.30, su=16, sv=8){
+  const p=[], n=[], id=[];
+  for(let i=0;i<=su;i++){ const u=i/su*Math.PI*2, cu=Math.cos(u), siu=Math.sin(u);
+    for(let j=0;j<=sv;j++){ const v=j/sv*Math.PI*2, cv=Math.cos(v), sv2=Math.sin(v);
+      p.push(r*sv2, (R+r*cv)*cu, (R+r*cv)*siu);
+      n.push(sv2, cv*cu, cv*siu); } }
+  for(let i=0;i<su;i++) for(let j=0;j<sv;j++){
+    const a=i*(sv+1)+j, b=a+sv+1;
+    id.push(a,b,a+1, a+1,b,b+1); }
+  return [p,n,id];
+}
+
+// Saige hull: a low, long, faceted wedge. Silhouette does the work — the deck art
+// reads as a dark shape with luminous rings, so the body stays near-black.
+function hullGeo(){
+  const v=[[0,0.10,-2.0],[0.62,0.02,0.5],[-0.62,0.02,0.5],[0,0.52,0.10],[0,-0.22,0.30],[0,0.20,1.55]];
+  const f=[[0,1,3],[0,3,2],[0,4,1],[0,2,4],[3,1,5],[3,5,2],[1,4,5],[4,2,5]];
+  const p=[], n=[], id=[];
+  for(const t of f){ const b=p.length/3;
+    const A=v[t[0]],B=v[t[1]],C=v[t[2]];
+    const ux=B[0]-A[0],uy=B[1]-A[1],uz=B[2]-A[2];
+    const wx=C[0]-A[0],wy=C[1]-A[1],wz=C[2]-A[2];
+    let nx=uy*wz-uz*wy, ny=uz*wx-ux*wz, nz=ux*wy-uy*wx;
+    const L=Math.hypot(nx,ny,nz)||1; nx/=L; ny/=L; nz/=L;
+    for(const q of [A,B,C]){ p.push(q[0],q[1],q[2]); n.push(nx,ny,nz); }
+    id.push(b,b+1,b+2); }
+  return [p,n,id];
+}
+const MESH_BOX  = makeMesh(...boxGeo(),   1400);
+const MESH_SPH  = makeMesh(...sphereGeo(), 460);
+const MESH_HULL = makeMesh(...hullGeo(),    12);
+const MESH_TOR  = makeMesh(...torusGeo(),   16);
+
+/* ── paper + drowned-town silhouettes ──────────────────────────────────── */
+const PAPER_N = 512;
+function makePaper(){
+  const c2=document.createElement('canvas'); c2.width=c2.height=PAPER_N;
+  const x2=c2.getContext('2d'); const img=x2.createImageData(PAPER_N,PAPER_N); const d=img.data;
+  const prev=new Float32Array(PAPER_N);
+  for(let y=0;y<PAPER_N;y++) for(let x=0;x<PAPER_N;x++){
+    const v=Math.random()*0.68 + prev[x]*0.32; prev[x]=v;
+    const b=128+(v-0.5)*168, i=(y*PAPER_N+x)*4;
+    d[i]=d[i+1]=d[i+2]=b; d[i+3]=255; }
+  x2.putImageData(img,0,0);
+  x2.globalAlpha=0.10;
+  for(let i=0;i<900;i++){ const x=Math.random()*PAPER_N,y=Math.random()*PAPER_N;
+    const len=6+Math.random()*40, ang=(Math.random()-0.5)*0.5+(Math.random()>0.5?0:Math.PI/2);
+    x2.strokeStyle=Math.random()>0.5?'#fff':'#000'; x2.lineWidth=0.6+Math.random()*1.1;
+    x2.beginPath(); x2.moveTo(x,y); x2.lineTo(x+Math.cos(ang)*len,y+Math.sin(ang)*len); x2.stroke(); }
+  const t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c2);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
+  return t;
+}
+const texPaper = makePaper();
+
+function makeTown(seed,w=1280,h=320){
+  let s=seed; const rnd=()=>(s=(s*1664525+1013904223)>>>0)/4294967296;
+  const c2=document.createElement('canvas'); c2.width=w; c2.height=h;
+  const x2=c2.getContext('2d'); x2.clearRect(0,0,w,h); x2.fillStyle='#000'; x2.strokeStyle='#000';
+  const water=h*0.86;
+  for(let i=0;i<90;i++){ const px=rnd()*w, top=water-rnd()*h*0.42;
+    x2.lineWidth=1.2+rnd()*2.4; x2.beginPath(); x2.moveTo(px,top);
+    x2.lineTo(px+(rnd()-0.5)*7, water+rnd()*h*0.09); x2.stroke(); }
+  let x=-40;
+  while(x<w+40){
+    const bw=26+rnd()*84, bh=h*(0.16+rnd()*0.46), by=water-h*rnd()*0.16, top=by-bh;
+    const j=()=>(rnd()-0.5)*3;
+    x2.beginPath(); x2.moveTo(x+j(),by+j()); x2.lineTo(x+j(),top+j());
+    if(rnd()>0.35){ x2.lineTo(x+bw*0.5+j(), top-bh*(0.14+rnd()*0.3)+j()); x2.lineTo(x+bw+j(),top+j()); }
+    else { x2.lineTo(x+bw*0.42+j(),top-bh*0.07+j()); x2.lineTo(x+bw*0.42+j(),top+j()); x2.lineTo(x+bw+j(),top+j()); }
+    x2.lineTo(x+bw+j(),by+j()); x2.closePath(); x2.fill();
+    if(rnd()>0.55){ const mx=x+bw*(0.2+rnd()*0.6), mh=bh*(0.3+rnd()*0.95);
+      x2.lineWidth=1+rnd()*1.6; x2.beginPath(); x2.moveTo(mx,top);
+      x2.lineTo(mx+(rnd()-0.5)*5, top-mh); x2.stroke();
+      if(rnd()>0.6){ x2.beginPath(); x2.arc(mx,top-mh,2+rnd()*3,0,6.284); x2.fill(); } }
+    x += bw*(0.52+rnd()*0.55);
+  }
+  const t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c2);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  return t;
+}
+const towns=[makeTown(7),makeTown(4021),makeTown(90210)];
+/* The horizon city. `x` is now an offset from the track centreline, not an
+   absolute world position, and `cover:true` marks the backdrop layer that must
+   always reach both screen edges — its width is fitted to the frustum at draw
+   time. The other three are deliberately partial: they are clusters of city,
+   and they should slide past rather than form a continuous wall.
+
+   Before this they sat at fixed world x with fixed widths, so once the route
+   branched (27 units per fork) the whole skyline drifted sideways and ran out
+   before the edge of the screen — the band of city that stops short on the left
+   and right. */
+const SILH=[
+  {tex:towns[0], pos:[  10,-2,-372], size:[900,30], fog:0.88, cover:true},
+  {tex:towns[1], pos:[-150,-2,-262], size:[430,22], fog:0.72},
+  {tex:towns[2], pos:[ 190,-2,-205], size:[320,17], fog:0.58},
+  {tex:towns[1], pos:[ -40,-2,-152], size:[210,12], fog:0.44}
+];
+
+// Scratch, so the per-frame silhouette fit allocates nothing.
+const SILH_POS = new Float32Array(3), SILH_SIZE = new Float32Array(2);
+
+/* ── framebuffer ───────────────────────────────────────────────────────── */
+let fbo, texColor, texDepth, FW=1, FH=1;
+function makeFBO(w,h){
+  if(fbo){ gl.deleteFramebuffer(fbo); gl.deleteTexture(texColor); gl.deleteTexture(texDepth); }
+  FW=Math.max(1,w|0); FH=Math.max(1,h|0);
+  texColor=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,texColor);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,FW,FH,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  texDepth=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,texDepth);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.DEPTH_COMPONENT24,FW,FH,0,gl.DEPTH_COMPONENT,gl.UNSIGNED_INT,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  fbo=gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texColor,0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D,texDepth,0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE CHART
+   Hand-authored, deliberately. A rhythm game's chart is its soul, and an
+   onset-detection algorithm writing it would be outsourcing exactly the thing
+   that makes the game alive. Patterns are 16th-note steps; `s` is the step
+   index within the pattern, `lane` is 0..4, and flow points sit on OFF-beats
+   (odd steps) by design — that is what separates surviving from playing.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* ── PHRASES, NOT A STREAM ──────────────────────────────────────────────
+   The old charts put an orb on every 8th — 16 per 2 bars — on the theory that
+   "orbs are the groove, so they must be frequent". That theory is now dead, and
+   this is the corrected version of it.
+
+   An orb on every 8th means every orb is the same orb. There is no phrase head,
+   no rest to fall into, no figure to anticipate, and every note is worth exactly
+   what the last one was. The result reads as strumming: continuous, undifferen-
+   tiated motion. Frequency was never what made it feel like drumming; SHAPE is.
+
+   These charts are built from figures instead:
+
+     · 6–10 notes per 2 bars, not 16.
+     · Every figure opens on an ACCENT (`a:2`) — that is the punch, and it pumps
+       the bed underneath it.
+     · Figures are separated by RESTS. The silence is what makes the next accent
+       land; it is load-bearing, not a gap someone forgot to fill.
+     · Lines have melodic direction — a climb, a fall, a leap and a return — so
+       you can see the riff coming and play into it rather than reacting to each
+       note in isolation.
+     · Syncopation. Notes sit off the 8th grid (odd 16ths) deliberately, which is
+       where the swing lives and what the Flow chain rewards.
+
+   `s` is the 16th step within the pattern, `lane` is the fret, `a` is the
+   accent tier (2 = phrase head, 1 = body, 0 = ghost).
+
+   CHARTS MUST STILL WALK. A lane change snaps to the 8th, so consecutive notes
+   may not be further apart in lanes than there are 8ths between them:
+   |Δlane| <= floor(Δsteps / 2). Verified at load by validateCharts() below —
+   an unreachable jump reads to the player as the beat simply stopping.        */
+const PATTERNS = {
+  // Opening figure: a three-note climb, a rest, then the answer falling back.
+  easy: { bars:2, ev:[
+    {s:0,  lane:2, a:2}, {s:2,  lane:3, a:1}, {s:4,  lane:4, a:1},
+    // rest through beat 2
+    {s:8,  lane:3, a:2}, {s:11, lane:2, a:1},
+    // rest
+    {s:16, lane:2, a:2}, {s:18, lane:1, a:1}, {s:20, lane:0, a:1},
+    // long rest — the bar breathes
+    {s:26, lane:1, a:2}, {s:28, lane:2, a:1} ]},
+
+  // VERSE A — low and syncopated. The riff sits under the clap and answers it.
+  verseA: { bars:2, ev:[
+    {s:0,  lane:1, a:2}, {s:3,  lane:1, a:1}, {s:6,  lane:0, a:1},
+    {s:8,  lane:1, a:2}, {s:10, lane:0, a:0},
+    {s:16, lane:1, a:2}, {s:19, lane:2, a:1}, {s:22, lane:3, a:1},
+    {s:24, lane:2, a:2}, {s:30, lane:1, a:1},
+    {s:13, lane:4, t:'haz'} ]},
+
+  // VERSE B — the same shape one fret up, so the section reads as a repeat with
+  // a lift rather than as a new idea. Pentatonic, so it cannot go wrong.
+  verseB: { bars:2, ev:[
+    {s:0,  lane:2, a:2}, {s:3,  lane:2, a:1}, {s:6,  lane:1, a:1},
+    {s:8,  lane:2, a:2}, {s:10, lane:1, a:0},
+    {s:16, lane:2, a:2}, {s:19, lane:3, a:1}, {s:22, lane:4, a:1},
+    {s:24, lane:3, a:2}, {s:28, lane:2, a:1}, {s:30, lane:1, a:1},
+    {s:13, lane:0, t:'haz'} ]},
+
+  // CHORUS — the payoff. Denser, higher, and it opens on the strongest accent
+  // in the track: four straight hits before it lets you breathe.
+  chorus: { bars:2, ev:[
+    {s:0,  lane:4, a:2}, {s:2,  lane:4, a:1}, {s:4,  lane:3, a:1}, {s:6,  lane:4, a:1},
+    {s:8,  lane:3, a:2}, {s:11, lane:3, a:1}, {s:14, lane:4, a:1},
+    {s:16, lane:4, a:2}, {s:18, lane:3, a:1}, {s:20, lane:2, a:1},
+    {s:24, lane:1, a:2}, {s:27, lane:2, a:1}, {s:30, lane:3, a:1},
+    {s:0,  lane:2, t:'jump'} ]},
+
+  /* MELODY sections reinterpret the same five slots as the five degrees of the
+     pentatonic scale instead of five frets on the deck — lane 0 is the lowest
+     note, lane 4 the highest. The chart machinery is untouched; only the
+     meaning of `lane` changes when the camera turns.
+     Hazards here are notes you may NOT play right now, which is musical
+     constraint doing the work of level design. */
+  ascent: { bars:2, ev:[
+    {s:0,  lane:0, a:2}, {s:2,  lane:1, a:1}, {s:4,  lane:2, a:1}, {s:6,  lane:3, a:1},
+    {s:8,  lane:4, a:2},
+    {s:16, lane:3, a:2}, {s:18, lane:2, a:1}, {s:20, lane:1, a:1},
+    {s:24, lane:2, a:2}, {s:28, lane:4, a:1},
+    {s:13, lane:0, t:'haz'} ]},
+
+  /* SIDE STREETS — three lanes wide, so only the middle three frets (C D E).
+     A narrower street is a narrower melodic range, which is why these read as a
+     detour rather than a different game: same instrument, fewer notes on it,
+     and the line has to say more with less. They are also busier and lower to
+     the ground than the main track, which is what a back street should feel
+     like next to a causeway. */
+  alley: { bars:2, span:[1,3], ev:[
+    {s:0,  lane:2, a:2}, {s:3,  lane:1, a:1}, {s:6,  lane:2, a:1},
+    {s:8,  lane:3, a:2}, {s:11, lane:2, a:1},
+    {s:16, lane:2, a:2}, {s:18, lane:3, a:1}, {s:22, lane:2, a:1},
+    {s:24, lane:1, a:2}, {s:28, lane:2, a:1}, {s:30, lane:3, a:1} ]},
+
+  canal: { bars:2, span:[1,3], ev:[
+    {s:0,  lane:3, a:2}, {s:2,  lane:2, a:1}, {s:4,  lane:3, a:1},
+    {s:8,  lane:1, a:2}, {s:12, lane:2, a:1},
+    {s:16, lane:3, a:2}, {s:19, lane:2, a:1},
+    {s:24, lane:1, a:2}, {s:26, lane:2, a:1}, {s:28, lane:3, a:1} ]},
+
+  // BRIDGE — the sparsest thing in the track. Almost all rest, so the few notes
+  // that are here carry real weight, and the gate lands in the hole.
+  bridge: { bars:2, ev:[
+    {s:0,  lane:2, t:'jump'},
+    {s:4,  lane:2, a:2}, {s:8,  lane:3, a:1},
+    {s:16, lane:3, a:2}, {s:20, lane:2, a:1},
+    {s:26, lane:1, a:2} ]}
+};
+
+/* Charts must WALK, and this is checked rather than trusted — an unreachable
+   jump does not look like a bug, it looks like the beat stopping, which is the
+   least diagnosable failure a rhythm game has. Runs once at load. */
+function validateCharts(){
+  const bad = [];
+  for(const [name, pat] of Object.entries(PATTERNS)){
+    const notes = pat.ev.filter(e => !e.t || e.t === 'flow')
+                        .slice().sort((x,y) => x.s - y.s);
+    // A pattern may not use a lane its section does not have.
+    const sp = pat.span || [0, LANES-1];
+    for(const e of pat.ev){
+      if(e.lane < sp[0] || e.lane > sp[1])
+        bad.push(`${name}: s${e.s} uses lane ${e.lane}, outside span ${sp[0]}..${sp[1]}`);
+    }
+    for(let i=1;i<notes.length;i++){
+      const ds = notes[i].s - notes[i-1].s;
+      const dl = Math.abs(notes[i].lane - notes[i-1].lane);
+      if(dl > Math.floor(ds/2))
+        bad.push(`${name}: s${notes[i-1].s}(L${notes[i-1].lane}) -> s${notes[i].s}(L${notes[i].lane}) needs ${dl} lanes in ${ds} steps`);
+    }
+  }
+  if(bad.length) console.error('UNREACHABLE CHART TRANSITIONS:\n' + bad.join('\n'));
+  return bad;
+}
+validateCharts();
+
+/* ── THE ROUTE GRAPH ────────────────────────────────────────────────────
+   The track is not a list, it is a graph. Every node is 8 bars and carries a
+   junction at its midpoint; the branch you take there decides the next node.
+   The route is therefore built LAZILY, one node at a time, and the chart can
+   never be fully expanded up front — which is the point. There is no "the"
+   track, only the one you drove.
+
+   Committing a branch JUNC_LEAD beats before the node changes is not a feel
+   decision, it is a hard requirement: objects render ~320 units ahead, and at
+   20 units/beat that is 16 beats of geometry that must already exist.         */
+// TRACK 01 — ATLANTICA. The city on the water; the nodes are its districts.
+const TRACK_NAME = 'Atlantica';
+const NODES = {
+  /* EVERY left fork reaches the melody layer, from anywhere, on the first
+     junction. It previously took two chained forks — 31 seconds of precise play
+     — which buried the most interesting thing in the game behind a corridor
+     almost nobody would walk. Left is always "play the melody". */
+  shallows:{ name:'The Shallows',    bars:8, kind:'causeway', pat:'easy',   exits:{L:'ascent',   S:'causeway', R:'alley'   } },
+  causeway:{ name:'Atlantica Reach', bars:8, kind:'causeway', pat:'verseA', exits:{L:'ascent',   S:'causeway', R:'alley'   } },
+  open:    { name:'Open Water',      bars:8, kind:'open',     pat:'chorus', exits:{L:'ascent',   S:'open',     R:'canal'   } },
+  drowned: { name:'Atlantica Deep',  bars:8, kind:'causeway', pat:'verseB', exits:{L:'ascent',   S:'drowned',  R:'alley'   } },
+  flood:   { name:'The Flood',       bars:8, kind:'open',     pat:'bridge', exits:{L:'ascent',   S:'open',     R:'canal'   } },
+
+  /* SIDE STREETS. A right fork turns off the causeway into a three-lane street
+     that runs SIX bars instead of eight and always rejoins the main track. The
+     city stops being one road with a bend in it and becomes a grid you can pick
+     a way through — which is the point, and also why the route graph was built
+     as a graph rather than a list.
+
+     Six bars, not four: JUNC_LEAD is 16 beats, so a four-bar node would put its
+     junction on its own start beat and the next fork would open the instant you
+     arrived. Six leaves eight beats of actual street before the choice. */
+  alley:   { name:'Back Alley',      bars:6, kind:'causeway', lanes:3, pat:'alley', exits:{L:'causeway', S:'causeway', R:'drowned'} },
+  canal:   { name:'The Canal',       bars:6, kind:'open',     lanes:3, pat:'canal', exits:{L:'open',     S:'open',     R:'flood'  } },
+  // The melody layer. Reached by taking a LEFT fork — so the branch is the
+  // choice of what KIND of music you play next, not just where you drive.
+  ascent:  { name:'The Ascent',      bars:8, kind:'melody',   pat:'ascent', exits:{L:'ascent',   S:'causeway', R:'open'    } }
+};
+const ALT_BASE = DECK_Y + 1.8, ALT_STEP = 3.2;   // altitude band per scale degree
+const altY = l => ALT_BASE + l*ALT_STEP;
+
+const EVENTS = [];
+const ROUTE = [];
+let routeEndBeat = 0;
+
+/* ESCALATION. The chart subdivides as you climb gears — this is the addictive
+   ramp. Tempo alone tops out; note DENSITY is what keeps raising the ceiling.
+     tier 0 → 8ths      (steps land on even 16th-slots)
+     tier 1 → 16ths     (fill the odd slots)
+     tier 2 → 32nds     (half-steps between them)
+   Density is baked in when a node is generated, so it reflects the gear you were
+   in when you earned it. Drop a gear and the NEXT node eases off again. */
+const SUBDIV = ['8ths','16ths','32nds'];
+// Mirrors Clock.gear. Kept separate because the first node is generated at module
+// scope, before `const Clock` is initialised — reading Clock.gear there is a TDZ
+// error. Clock.setGear() is the only writer.
+let gearNow = 1;
+const densityTier = () => Math.max(0, Math.min(2, gearNow - 1));
+/* ESCALATION adds notes BETWEEN the phrase notes, and every one it adds is a
+   GHOST (`a:0`). That is the rule that keeps the shape intact as density climbs:
+   the accents stay exactly where the author put them, and the extra notes fill
+   in underneath as detail rather than flattening the phrase back into a stream.
+   Get this wrong — add notes at full accent — and gear 3 sounds like the old
+   build again. Tier 1 fills every second gap, tier 2 every fourth. */
+function densify(evs, tier){
+  if(tier <= 0) return evs;
+  const out = evs.slice();
+  let i = 0;
+  for(const e of evs){
+    if(e.t && e.t !== 'flow') continue;
+    i++;
+    if(tier >= 1 && i % 2 === 0) out.push({ s:e.s+1,   lane:e.lane, a:0, fill:true });
+    if(tier >= 2 && i % 4 === 0) out.push({ s:e.s+0.5, lane:e.lane, a:0, fill:true });
+  }
+  return out;
+}
+
+function pushNode(key, choice){
+  const n = NODES[key];
+  const prev = ROUTE[ROUTE.length-1];
+  const cx = (prev ? prev.cx : 0) + (choice==='L' ? -CURVE_W : choice==='R' ? CURVE_W : 0);
+  const startBeat = routeEndBeat;
+  const tier = densityTier();
+  const ent = { key, name:n.name, kind:n.kind, startBeat,
+                endBeat: startBeat + n.bars*4, cx, tier,
+                lanes: n.lanes || LANES,
+                junctionBeat: startBeat + n.bars*4 - JUNC_LEAD };
+  ROUTE.push(ent);
+  routeEndBeat = ent.endBeat;
+
+  const pat = PATTERNS[n.pat];
+  const evs = densify(pat.ev, tier);
+  for(let rep=0; rep<n.bars/pat.bars; rep++)
+    for(const e of evs)
+      EVENTS.push({ beat: startBeat + rep*pat.bars*4 + e.s/4, lane:e.lane,
+                    t: e.t || 'flow', acc: e.a === undefined ? 1 : e.a,
+                    fill: !!e.fill, done:false });
+  EVENTS.push({ beat: ent.junctionBeat, lane:-1, t:'junction', done:false, committed:false, ent });
+  return ent;
+}
+pushNode('shallows', 'S');
+
+function routeIndexAt(b){
+  for(let i=ROUTE.length-1;i>=0;i--) if(b >= ROUTE[i].startBeat) return i;
+  return 0;
+}
+const routeAt = b => ROUTE[routeIndexAt(b)];
+
+/* Centreline of the track.
+   The bend runs from the JUNCTION to the node boundary — i.e. it begins exactly
+   where the fork rails are drawn and finishes exactly when the new node starts.
+   Getting this wrong (bending only once the next node began) made branching feel
+   broken: you pressed at a visible fork, nothing moved, and 320 units later the
+   world slid sideways for no visible reason.
+   The camera's look-at reads ahead, so it yaws into the turn with no explicit
+   heading maths. */
+function centerX(b){
+  const i = routeIndexAt(b);
+  const e = ROUTE[i], nx = ROUTE[i+1];
+  if(nx && b >= e.junctionBeat){
+    const span = Math.max(1e-6, e.endBeat - e.junctionBeat);
+    const t = Math.min(1, Math.max(0, (b - e.junctionBeat)/span));
+    return e.cx + (nx.cx - e.cx) * (t*t*(3-2*t));
+  }
+  return e.cx;
+}
+/* HOW WIDE IS THE ROAD HERE?
+   Lane count is interpolated across the junction with the same smoothstep the
+   centreline uses, so the deck NARROWS INTO the turn rather than snapping at
+   the node boundary — you can see the side street closing in before you are on
+   it, which is the whole read. Everything that needs a road width (deck, rails,
+   legs, gates) derives from this, so none of them can disagree. */
+function laneCountAt(b){
+  const i = routeIndexAt(b), e = ROUTE[i], nx = ROUTE[i+1];
+  if(nx && b >= e.junctionBeat){
+    const span = Math.max(1e-6, e.endBeat - e.junctionBeat);
+    const t = Math.min(1, Math.max(0, (b - e.junctionBeat)/span));
+    return e.lanes + (nx.lanes - e.lanes) * (t*t*(3-2*t));
+  }
+  return e.lanes;
+}
+const deckHalfW = b => LANE_W * laneCountAt(b) / 2;
+
+/* Which lanes you may actually occupy. A three-lane street keeps the MIDDLE
+   three, so the frets stay put: lane 2 is D wherever you are, and a side street
+   simply takes A and G away rather than re-tuning the instrument under you.
+   Narrower street, narrower melodic range. */
+function laneSpanAt(b){
+  const n = Math.round(laneCountAt(b));
+  const pad = Math.max(0, (LANES - n) >> 1);
+  return { lo: pad, hi: LANES-1-pad };
+}
+
+// Where the centreline WOULD go if you took side sx from this junction — the
+// fork rails are drawn along this, so the guide you see is literally the path.
+function branchX(ent, b, sx){
+  const span = Math.max(1e-6, ent.endBeat - ent.junctionBeat);
+  const t = Math.min(1, Math.max(0, (b - ent.junctionBeat)/span));
+  return ent.cx + sx*CURVE_W * (t*t*(3-2*t));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   AUDIO — five stems as synth voices. Real stems drop in behind the same
+   scheduling contract; only voice() changes.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════
+   THE FIVE VOICES OF ATLANTICA
+
+   One number means three things at once: lane index = TIMBRE = pentatonic
+   DEGREE. Lane 0 is the lowest note and the deepest voice; lane 4 the highest
+   and the brightest. Both views therefore teach the same fact — in chase view
+   you read it left-to-right, in the melody layer bottom-to-top — and a player
+   who learns one has learned the other.
+
+   None of these imitate an acoustic instrument. They are water: struck, dripped,
+   rung, swelled. All five feed a tempo-synced delay so the whole thing sounds
+   like it is happening in a flooded hall.                                    */
+/* THE FIVE FRETS. Not five instruments any more — five pitches of one lead
+   voice, and named after the notes they are so the fretboard teaches the scale.
+   The colours are unchanged and doing the same job Guitar Hero's do: they let
+   you read the line's shape ahead of you without reading positions. */
+const STEMS = [
+  {key:'f0', name:'A',  lane:0, col:[0.98,0.38,0.30]},
+  {key:'f1', name:'C',  lane:1, col:[0.98,0.66,0.28]},
+  {key:'f2', name:'D',  lane:2, col:[0.55,0.96,0.90]},
+  {key:'f3', name:'E',  lane:3, col:[0.99,0.86,0.34]},
+  {key:'f4', name:'G',  lane:4, col:[0.74,0.62,0.99]}
+];
+// lane -> pentatonic degree. Two degrees apart, so the five voices span about an
+// octave and a half: packed any tighter they blur into one chord instead of
+// reading as five separate things you can choose between.
+const ORB_DEG = l => 7 + l*2;        // D3 · G3 · C4 · E4 · A4
+/* ── PENTATONIC ─────────────────────────────────────────────────────────
+   A minor pentatonic — A C D E G — and nothing else, anywhere in the piece.
+   A pentatonic scale has no avoid notes: every pair of degrees is consonant,
+   so any combination of the five lanes harmonises with any other. That is what
+   makes "you cannot play a wrong note, only a different one" literally true,
+   and it is the precondition for two Saiges improvising together.
+   The same set will govern altitude when the melody layer lands.             */
+const PENT = [
+  55.00,  65.41,  73.42,  82.41,  98.00,   // A1 C2 D2 E2 G2
+ 110.00, 130.81, 146.83, 164.81, 196.00,   // A2 C3 D3 E3 G3
+ 220.00, 261.63, 293.66, 329.63, 392.00,   // A3 C4 D4 E4 G4
+ 440.00, 523.25, 587.33, 659.25, 783.99,   // A4 C5 D5 E5 G5
+ 880.00,1046.50,1174.66,1318.51,1567.98    // A5 C6 D6 E6 G6
+];
+const p = i => PENT[Math.max(0, Math.min(PENT.length-1, i))];
+
+// Root movement, one per bar. All roots are pentatonic degrees, so the harmony
+// never leaves the scale and no voice can collide with another.
+const ROOTS = [0, 1, 4, 2];                 // A · C · G · D  (degree index)
+
+/* Registers are deliberately far apart. The old mix had bass and pad fighting
+   for the same octave, which is why only the LEAD lane read as distinct. */
+const LEAD_MEL = [19,0,18,0, 17,0,0,15, 0,17,0,0, 18,0,20,0];   // A4–G5, sparse
+const ARP_SEQ  = [20,22,24,22, 21,23,20,23, 20,22,24,21, 23,20,22,24]; // A5+, constant 16ths
+
+const Clock = {
+  ctx:null, started:false,
+  bpm: GEARS[1], gear:1,
+  beatAtChange:0, timeAtChange:0,      // tempo map: beats address the chart, not seconds
+  step:0, nextStepTime:0, lookahead:0.12,
+
+  start(){
+    if(this.started) return;
+    this.ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+    this.master = this.ctx.createGain(); this.master.gain.value = volume * 0.8;
+    const comp = this.ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.ratio.value = 4;
+    this.master.connect(comp).connect(this.ctx.destination);
+
+    /* SIDECHAIN. Everything except the kick passes through `duck`, and every
+       kick slams it down and lets it breathe back over ~200ms. That pump IS the
+       four-to-the-floor sound — without it a house track is just a loud kick
+       with things next to it. */
+    this.duck = this.ctx.createGain(); this.duck.gain.value = 1;
+    this.duck.connect(this.master);
+
+    /* One bus per voice, PANNED TO ITS LANE. The left lane sounds left — you
+       hear the five voices laid out in the same space you see them in. */
+    this.bus = {};
+    for(const s of STEMS){
+      const g = this.ctx.createGain(); g.gain.value = 1;
+      if(this.ctx.createStereoPanner){
+        const pan = this.ctx.createStereoPanner();
+        pan.pan.value = (s.lane - 2)/2 * 0.7;
+        g.connect(pan).connect(this.duck);
+      } else g.connect(this.duck);
+      this.bus[s.key] = g;
+    }
+
+    /* The flooded hall. A tempo-synced feedback delay with the highs damped,
+       so every note you strike keeps ringing back off the water. This is what
+       makes sparse playing sound full instead of empty, which matters enormously
+       now that the ONLY notes are the ones the player collects. */
+    const c = this.ctx;
+    this.fx = c.createGain(); this.fx.gain.value = 0.34;
+    this.dly = c.createDelay(2.0);
+    this.dly.delayTime.value = this.spb()*0.75;          // dotted 8th
+    const fb = c.createGain(); fb.gain.value = 0.42;
+    const damp = c.createBiquadFilter(); damp.type='lowpass'; damp.frequency.value = 1900;
+    this.fx.connect(this.dly);
+    this.dly.connect(damp); damp.connect(fb); fb.connect(this.dly);
+    damp.connect(this.duck);                       // echoes pump with everything else
+    this.timeAtChange = this.ctx.currentTime + 0.12;
+    this.beatAtChange = 0;
+    this.nextStepTime = this.timeAtChange;
+    this.started = true;
+    setInterval(()=>this.schedule(), 25);
+  },
+  spb(){ return 60/this.bpm; },
+  // THE master clock. Everything visual and logical is a function of this.
+  songBeat(){ if(!this.started) return 0;
+    if(this.paused) return this.pauseBeat;
+    return this.beatAtChange + Math.max(0, this.ctx.currentTime - this.timeAtChange)/this.spb(); },
+
+  /* PAUSE. Because the audio clock is the only clock, pausing means freezing it —
+     there is no separate game timer that could drift out of sync while stopped.
+     We do NOT rely on suspend() halting currentTime (browsers disagree); instead
+     the tempo map is rebased on resume, which is correct either way. */
+  paused:false, pauseBeat:0,
+  pause(){
+    if(!this.started || this.paused) return;
+    this.pauseBeat = this.songBeat();
+    this.paused = true;
+    if(this.ctx.state === 'running') this.ctx.suspend();
+  },
+  resume(){
+    if(!this.started || !this.paused) return;
+    const go = ()=>{
+      this.beatAtChange = this.pauseBeat;
+      this.timeAtChange = this.ctx.currentTime;
+      this.nextStepTime = this.ctx.currentTime + 0.03;
+      this.step = Math.max(0, Math.round(this.pauseBeat*4));
+      this.paused = false;
+    };
+    if(this.ctx.state === 'suspended') this.ctx.resume().then(go); else go();
+  },
+  toggle(){ this.paused ? this.resume() : this.pause(); },
+  setGear(g){
+    g = Math.max(0, Math.min(GEARS.length-1, g));
+    if(g === this.gear) return;
+    // rebase the tempo map so the beat position is continuous across the change
+    const b = this.songBeat();
+    this.beatAtChange = b; this.timeAtChange = this.ctx.currentTime;
+    this.gear = g; this.bpm = GEARS[g]; gearNow = g;
+    if(this.dly) this.dly.delayTime.setTargetAtTime(this.spb()*0.75, this.ctx.currentTime, 0.2);
+  },
+
+  /* ── ALIEN VOCAL ────────────────────────────────────────────────────
+     Formant synthesis: a sawtooth pushed through three resonant bandpasses
+     parked at vowel formants. Morph the formants from one vowel to another
+     across the note and you get a voice saying something — but the pitch is
+     inhuman and the vowels are wrong for any language, which is exactly the
+     Atlantica register. Not a sample. Nothing to load. */
+  VOW: { OO:[300,870,2240], AH:[730,1090,2440], EE:[270,2290,3010], OH:[570,840,2410] },
+  alien(t, freq, dur, gain, from, to, dest){
+    if(!this.started) return;
+    const c = this.ctx;
+    const o = c.createOscillator(); o.type='sawtooth'; o.frequency.value = freq;
+    const sub = c.createOscillator(); sub.type='square'; sub.frequency.value = freq*0.5;
+    // vibrato — the thing that reads as "a throat" rather than "a synth"
+    const lfo = c.createOscillator(), lg = c.createGain();
+    lfo.frequency.value = 4.8 + Math.random()*1.4; lg.gain.value = freq*0.016;
+    lfo.connect(lg); lg.connect(o.frequency); lg.connect(sub.frequency);
+    const out = c.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(gain, t + dur*0.28);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const Q = [9, 11, 13], amp = [1.0, 0.6, 0.34];
+    for(let i=0;i<3;i++){
+      const bp = c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value = Q[i];
+      bp.frequency.setValueAtTime(from[i], t);
+      bp.frequency.linearRampToValueAtTime(to[i], t + dur*0.75);
+      const g = c.createGain(); g.gain.value = amp[i];
+      o.connect(bp); sub.connect(bp); bp.connect(g).connect(out);
+    }
+    out.connect(dest || this.duck);
+    const s = c.createGain(); s.gain.value = 0.5; out.connect(s); s.connect(this.fx);
+    o.start(t); sub.start(t); lfo.start(t);
+    o.stop(t+dur+0.1); sub.stop(t+dur+0.1); lfo.stop(t+dur+0.1);
+  },
+
+  /* ── FIVE FRETS, ONE INSTRUMENT ─────────────────────────────────────
+     This replaces the five-drum-kit model, and the reason is the whole point of
+     this rebuild.
+
+     Before: lane 0..4 were KICK, SUB, CLAP, BELL, HAT — five unrelated
+     percussion sounds, one orb on every 8th, every one at the same velocity.
+     That is why catching read as *strumming*. A stream of undifferentiated
+     hits has no melodic contour to follow and no dynamic shape to anticipate,
+     so there is nothing to be in flow WITH. Each note was interchangeable, and
+     interchangeable notes cannot land.
+
+     Now: the five lanes are five PITCHES of a single lead voice, exactly the
+     way five frets are five notes of one guitar. A run of orbs is a riff. It
+     has direction — up, down, a leap and a return — so you can hear the shape
+     of a phrase coming and play into it. That is the thing Guitar Hero has that
+     this did not.
+
+     The voice is a STAB: saw + detuned square + sub, a hard filter envelope,
+     and a noise transient on the attack that does the work a pick does. Short,
+     so it punches and gets out of the way of the next one.
+
+     `acc` is the accent tier and it is what makes a point a punch:
+       0  ghost   — quiet, filtered down, barely there
+       1  normal  — the body of a phrase
+       2  ACCENT  — phrase heads and downbeats: louder, brighter, longer, an
+                    octave doubling, a harder transient, and it ducks the bed
+                    so the whole mix flinches around it
+     A chart of all-1s would sound exactly as flat as the old one. The accents
+     are the music.                                                          */
+  strike(lane, deg, vel, at, acc){
+    if(!this.started) return;
+    const c = this.ctx, t = (at === undefined ? c.currentTime : Math.max(at, c.currentTime));
+    const s = STEMS[lane]; if(!s) return;
+    const dest = this.bus[s.key];
+    const f = p(deg);
+    const v = vel === undefined ? 1 : vel;
+    const A = acc === undefined ? 1 : acc;
+
+    // Accent shaping. One table, so the three tiers stay obviously related and
+    // nobody has to reverse-engineer the numbers later.
+    const amp   = A >= 2 ? 0.62*v : A <= 0 ? 0.13*v : 0.34*v;
+    const dec   = A >= 2 ? 0.52   : A <= 0 ? 0.14   : 0.30;
+    const open  = A >= 2 ? 9.5    : A <= 0 ? 2.2    : 5.0;   // filter env top, x f
+    const crack = A >= 2 ? 0.30   : A <= 0 ? 0.04   : 0.14;  // pick transient
+
+    const g  = c.createGain();
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass'; lp.Q.value = A >= 2 ? 7 : 4.5;
+    lp.frequency.setValueAtTime(Math.min(15000, f*open), t);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(180, f*1.7), t + dec*0.85);
+
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amp, t + 0.004);      // near-instant attack
+    g.gain.exponentialRampToValueAtTime(amp*0.28, t + dec*0.34);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dec);
+
+    const mk = (type, freq, det, lvl) => {
+      const o = c.createOscillator(); o.type = type;
+      o.frequency.value = freq; o.detune.value = det;
+      const og = c.createGain(); og.gain.value = lvl;
+      o.connect(og).connect(lp);
+      o.start(t); o.stop(t + dec + 0.06);
+    };
+    mk('sawtooth', f,     0,   0.85);
+    mk('square',   f,    +8,   0.40);          // detune = width, not chorus
+    mk('sine',     f/2,   0,   0.55);          // sub, so a low fret still has body
+    if(A >= 2) mk('sawtooth', f*2, -6, 0.26);  // accents ring an octave up
+
+    lp.connect(g).connect(dest);
+    const sg = c.createGain(); sg.gain.value = A >= 2 ? 0.55 : 0.30;
+    g.connect(sg); sg.connect(this.fx);
+
+    // THE PICK. A tiny bandpassed noise burst at the attack. This is most of
+    // what "punch" actually is — the transient, not the level.
+    if(crack > 0.05) this.noise(t, 0.018, Math.min(9000, f*7), 'bandpass', crack, dest);
+
+    /* An accent FLINCHES the bed. The sidechain used to belong to the lane-0
+       orb, which meant the pump only happened when the chart went low. Tying it
+       to the accent instead means the mix breathes with the PHRASING — every
+       phrase head pumps, wherever it sits on the neck. */
+    if(A >= 2){
+      const D = this.duck;
+      D.gain.cancelScheduledValues(t);
+      D.gain.setValueAtTime(0.46, t);
+      D.gain.exponentialRampToValueAtTime(1.0, t + Math.min(0.20, this.spb()*0.5));
+    }
+  },
+  schedule(){
+    if(!this.started || this.paused) return;
+    const spStep = this.spb()/4;
+    while(this.nextStepTime < this.ctx.currentTime + this.lookahead){
+      this.voice(this.step, this.nextStepTime);
+      this.nextStepTime += spStep;
+      this.step++;
+    }
+  },
+
+  env(t, a, d, peak){ const g=this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(peak, t+a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+a+d); return g; },
+  noise(t, len, hz, type, gain, dest){
+    const c=this.ctx, sr=c.sampleRate, buf=c.createBuffer(1, Math.max(1,sr*len), sr);
+    const d=buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2.2);
+    const s=c.createBufferSource(); s.buffer=buf;
+    const f=c.createBiquadFilter(); f.type=type; f.frequency.value=hz;
+    const g=c.createGain(); g.gain.value=gain;
+    s.connect(f).connect(g).connect(dest||this.master); s.start(t);
+  },
+  tone(t, freq, type, a, d, peak, filtHz, dest, detune){
+    const c=this.ctx, o=c.createOscillator(); o.type=type; o.frequency.value=freq;
+    if(detune) o.detune.value = detune;
+    const g=this.env(t,a,d,peak);
+    if(filtHz){ const f=c.createBiquadFilter(); f.type='lowpass'; f.frequency.value=filtHz;
+      o.connect(f).connect(g); } else o.connect(g);
+    g.connect(dest||this.master); o.start(t); o.stop(t+a+d+0.02);
+  },
+  // plucked note with a filter sweep — used by ARP and the note toss
+  pluck(t, freq, peak, dest, dur){
+    const c=this.ctx, o=c.createOscillator(), f=c.createBiquadFilter(), g=c.createGain();
+    o.type='triangle'; o.frequency.value=freq;
+    f.type='lowpass'; f.Q.value=6;
+    f.frequency.setValueAtTime(freq*7, t);
+    f.frequency.exponentialRampToValueAtTime(Math.max(220,freq*1.6), t+(dur||0.16));
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(peak, t+0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+(dur||0.16));
+    o.connect(f).connect(g).connect(dest||this.master);
+    o.start(t); o.stop(t+(dur||0.16)+0.02);
+  },
+
+  /* Five voices, separated on THREE axes at once — register, timbre and rhythm.
+     Any one axis alone is not enough: the old mix put bass and pad in the same
+     octave with the same waveform, so four of the five lanes blurred into one
+     another and only LEAD read as distinct. Now:
+       BASS  low   · short + punchy · syncopated       (pans right)
+       PAD   mid   · sustained wash · one chord a bar  (pans left-of-centre)
+       DRUMS centre· transient      · the grid
+       LEAD  high  · reedy pulse    · sparse phrase    (pans hard left)
+       ARP   top   · glassy pluck   · constant 16ths   (pans hard right)      */
+  /* THE ATLANTICA BED — constant, and it never changes.
+     The only thing that changes the sound is what the player collects. So the
+     bed's whole job is to hold the grid and the mood: a heartbeat under water,
+     a wave that swells across each bar, and a soft tick so the 8ths are
+     findable. It is mixed low and stays out of the way of the five voices. */
+  /* ── THE ATLANTICA GROOVE — four to the floor ───────────────────────
+     Constant, and it still never changes: the sound rule holds. But the bed is
+     now a driving 4/4 rather than ambience, because a rhythm you can lock to is
+     what makes striking a note ON the grid feel good. The player plays the
+     topline over a floor that is already moving.                             */
+  voice(step, t){
+    const s16 = step % 16, bar = Math.floor(step/16);
+    const root = ROOTS[bar % 4];
+    const c = this.ctx, D = this.duck;
+
+    /* ── THE FLOOR ───────────────────────────────────────────────────
+       The bed has drums again, and this reverses a documented decision, so the
+       reasoning matters.
+
+       The previous build moved the entire kit into the orbs, leaving a bed of
+       one subliminal tick. The intention was that a bad run should sound empty.
+       What it actually produced was a game with no pocket: with nothing holding
+       the grid, the player's notes had nothing to land against, and a note that
+       lands against nothing cannot punch. It just strums.
+
+       Guitar Hero works because the band is already playing. You are the lead.
+       The drums and bass are the floor you lock into, the thing that makes
+       hitting the grid feel like hitting something.
+
+       THE SOUND RULE STILL HOLDS. This bed is CONSTANT — it never varies, never
+       responds, never fills in for you. Nothing here reacts to the player, so
+       nothing here is the game playing itself. What the player controls is the
+       entire topline, which is still the only thing that changes.
+
+       Everything except the kick runs through `duck`, so the floor pumps.      */
+    const K = D;                                   // everything ducked but the kick
+
+    // KICK — four to the floor, straight to master. It IS the duck.
+    if(s16 % 4 === 0){
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(112, t);
+      o.frequency.exponentialRampToValueAtTime(43, t + 0.055);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.92, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
+      o.connect(g).connect(this.master);
+      o.start(t); o.stop(t + 0.34);
+      this.noise(t, 0.010, 2600, 'highpass', 0.20, this.master);
+      D.gain.cancelScheduledValues(t);
+      D.gain.setValueAtTime(0.34, t);
+      D.gain.exponentialRampToValueAtTime(1.0, t + Math.min(0.22, this.spb()*0.55));
+    }
+
+    // CLAP — 2 and 4, three smeared bursts like a real clap machine.
+    if(s16 === 4 || s16 === 12){
+      for(let i=0;i<3;i++) this.noise(t + i*0.009, 0.045, 1700, 'bandpass', 0.30, K);
+      this.noise(t + 0.020, 0.16, 1250, 'bandpass', 0.17, K);
+    }
+
+    // OPEN HAT on the offbeat 8ths — the "tss" that makes it move.
+    if(s16 % 4 === 2) this.noise(t, 0.075, 8200, 'highpass', 0.10, K);
+    // CLOSED HAT / shaker on the 16ths between, quiet, for forward motion.
+    else if(s16 % 2 === 1) this.noise(t, 0.016, 9500, 'highpass', 0.045, K);
+
+    /* OFFBEAT BASS — lands in the holes the kick leaves, which is the other half
+       of why house moves. Root note of the bar, so it never fights the lead:
+       the lead is pentatonic over the same root. */
+    if(s16 % 4 === 2){
+      const o = c.createOscillator(), g = c.createGain(), lp = c.createBiquadFilter();
+      const bf = p(root) / 2;
+      o.type = 'sawtooth'; o.frequency.value = bf;
+      lp.type = 'lowpass'; lp.Q.value = 6;
+      lp.frequency.setValueAtTime(bf*7, t);
+      lp.frequency.exponentialRampToValueAtTime(bf*2.2, t + 0.13);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.30, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.20);
+      o.connect(lp).connect(g).connect(K);
+      o.start(t); o.stop(t + 0.24);
+    }
+
+    // ALIEN CHOIR — one long morphing vowel every 4 bars, low in the mix.
+    // Atlantica singing to itself.
+    if(s16===0 && bar % 4 === 0){
+      const dur = this.spb()*7.5;
+      this.alien(t, p(root+10), dur, 0.10, this.VOW.OO, this.VOW.AH);
+      this.alien(t+this.spb()*0.5, p(root+12), dur*0.8, 0.07, this.VOW.OH, this.VOW.EE);
+    }
+    // and a breath of tide under it all
+    if(s16===0 && bar % 2 === 0){
+      const sr=c.sampleRate, len=this.spb()*4, buf=c.createBuffer(1, sr*len, sr);
+      const d=buf.getChannelData(0);
+      for(let i=0;i<d.length;i++){ const u=i/d.length;
+        d[i]=(Math.random()*2-1)*Math.sin(u*Math.PI)*0.9; }
+      const src=c.createBufferSource(); src.buffer=buf;
+      const bp=c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=1.0;
+      bp.frequency.setValueAtTime(260,t);
+      bp.frequency.linearRampToValueAtTime(1100, t+len*0.5);
+      bp.frequency.linearRampToValueAtTime(220, t+len);
+      const g=c.createGain(); g.gain.value=0.06;
+      src.connect(bp).connect(g).connect(D); src.start(t);
+    }
+  },
+
+  /* THE MELODY VOICE — a sustained tone that glides to whatever pentatonic
+     degree your altitude selects. This is the difference between a game that
+     scores you and an instrument you play: you hear yourself move, continuously,
+     and because the scale has no avoid notes there is no wrong altitude to be at.
+     Quantised in pitch exactly as Time Traction quantises in time. */
+  melodyOn(){
+    if(this.mv || !this.started) return;
+    const c = this.ctx;
+    const o = c.createOscillator(), o2 = c.createOscillator();
+    const f = c.createBiquadFilter(), g = c.createGain();
+    o.type='sawtooth'; o2.type='square'; o2.detune.value = -1200;
+    f.type='lowpass'; f.frequency.value = 2600; f.Q.value = 3;
+    g.gain.value = 0.0001;
+    o.connect(f); o2.connect(f); f.connect(g).connect(this.bus ? this.bus.lead : this.master);
+    o.start(); o2.start();
+    this.mv = {o, o2, g, f};
+  },
+  melodySet(freq, gain){
+    if(!this.mv) return;
+    const t = this.ctx.currentTime;
+    this.mv.o.frequency.setTargetAtTime(freq, t, 0.018);      // slight portamento
+    this.mv.o2.frequency.setTargetAtTime(freq, t, 0.018);
+    this.mv.f.frequency.setTargetAtTime(900 + freq*2.4, t, 0.05);
+    this.mv.g.gain.setTargetAtTime(Math.max(0.0001, gain), t, 0.04);
+  },
+  // A riser under the layer change, so the camera turn reads as composed.
+  riser(beats){
+    if(!this.started) return;
+    const c = this.ctx, t = c.currentTime, dur = Math.max(0.15, beats*this.spb());
+    const o = c.createOscillator(), f = c.createBiquadFilter(), g = c.createGain();
+    o.type='sawtooth';
+    o.frequency.setValueAtTime(110, t);
+    o.frequency.exponentialRampToValueAtTime(880, t+dur);
+    f.type='bandpass'; f.Q.value=4;
+    f.frequency.setValueAtTime(400, t);
+    f.frequency.exponentialRampToValueAtTime(4200, t+dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.13, t+dur*0.85);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+dur+0.12);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(t); o.stop(t+dur+0.16);
+  },
+  melodyOff(){
+    if(!this.mv) return;
+    const v = this.mv; this.mv = null;
+    const t = this.ctx.currentTime;
+    v.g.gain.setTargetAtTime(0.0001, t, 0.08);
+    setTimeout(()=>{ try{ v.o.stop(); v.o2.stop(); }catch(_){} }, 400);
+  },
+
+  // Time Traction: a mistimed move is HEARD, not just scored. Flam = you dragged.
+  flam(){ if(!this.started) return;
+    const t=this.ctx.currentTime;
+    this.noise(t,0.05,2400,'bandpass',0.20);
+    this.noise(t+0.055,0.05,2100,'bandpass',0.13); },
+  thud(){ if(!this.started) return;
+    const t=this.ctx.currentTime, o=this.ctx.createOscillator(), g=this.env(t,0.005,0.45,0.8);
+    o.type='square'; o.frequency.setValueAtTime(90,t);
+    o.frequency.exponentialRampToValueAtTime(30,t+0.35);
+    o.connect(g).connect(this.master); o.start(t); o.stop(t+0.5); },
+  chime(n){ if(!this.started) return;
+    const t=this.ctx.currentTime;
+    this.tone(t, 440*Math.pow(2, (n%8)/12), 'sine', 0.005, 0.20, 0.16, 6000); },
+  /* MULTIPLIER UP. A short rising two-note figure, pitched by the tier so ×4
+     is audibly higher than ×2. It has to be a sound and not just a number —
+     the step change is the reward, and a reward you only see is half a reward. */
+  multUp(n){ if(!this.started) return;
+    const t = this.ctx.currentTime, base = 12 + n*2;
+    this.tone(t,        p(base),   'triangle', 0.004, 0.16, 0.20, 8000);
+    this.tone(t + 0.055, p(base+2), 'triangle', 0.004, 0.26, 0.24, 8000);
+    this.noise(t, 0.02, 6000, 'highpass', 0.16); },
+  latch(){ if(!this.started) return;
+    const t=this.ctx.currentTime;
+    this.tone(t, 660, 'sine', 0.006, 0.28, 0.22, 6000);
+    this.tone(t+0.06, 990, 'sine', 0.006, 0.26, 0.16, 6000); }
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   GAME
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const Game = {
+  lane:2, laneVis:2, slide:0,
+  pendingLane:null, pendingAt:0,
+  jumpAt:-99,
+  lead:0,                                  // race position, in world units
+  downedUntil:-99, downSide:0,
+  inMelody:false, sideMix:0, octave:0,     // melody layer: side view, altitude = pitch
+  melodyRequest:false, togglePending:-1, lastSectionWants:false,
+
+  /* TOGGLE THE LAYER — spacebar, any time.
+     This was originally reachable only by taking a junction fork, which measured
+     out as: be in lane 0 exactly, AND hit a 126ms window, or wait 15 seconds for
+     the next junction. That is a rhythm-expert input standing in front of a mode
+     switch, and in practice it meant nobody ever saw the melody layer.
+     It still lands on the next BAR rather than instantly, so the camera turn is
+     a musical event and not a jump-cut. */
+  toggleLayer(){
+    if(!Clock.started || Clock.paused) return;
+    const b = Clock.songBeat();
+    if(this.togglePending >= 0) return;
+    this.togglePending = Math.floor(b/4)*4 + 4;          // next bar line
+    judge(this.melodyRequest ? 'ARRANGEMENT ▼' : 'MELODY ▲', '#4fd4e4');
+    Clock.riser(this.togglePending - b);
+  },
+  arm:{lead:0,pad:0,drums:1,bass:0,arp:0},
+  stemGain:{lead:0,pad:0,drums:1,bass:0,arp:0},
+  latched:{},
+  flowChain:0, flowIntensity:0, lastFlowBeat:-99,
+  shake:0, dead:false, finished:false,
+
+  jumping(b){ return b - this.jumpAt < 0.9; },
+  jumpY(b){ const u=(b-this.jumpAt)/0.9; return (u<0||u>1)?0:Math.sin(u*Math.PI)*3.4; },
+
+
+  /* Time Traction. Input snaps to the 8th grid.
+     Inside the window  → clean: the move lands exactly on the grid line.
+     Outside the window → the move still happens, but late, the Saige slides
+                          across the lane boundary, and your stem flams. */
+  branchChoice:null,
+
+  // The junction currently open for a decision, if any.
+  openJunction(b){
+    for(const e of EVENTS)
+      if(e.t==='junction' && !e.committed && b >= e.beat - 8 && b <= e.beat + 0.5) return e;
+    return null;
+  },
+
+  tryLane(dir){
+    if(this.dead || !Clock.started || Clock.paused) return;
+    const b = Clock.songBeat();
+    const grid = Math.round(b*2)/2;               // nearest 8th
+    const err = b - grid;                          // <0 early, >0 late
+    const sp = laneSpanAt(b);
+    const target = Math.max(sp.lo, Math.min(sp.hi, this.lane + dir));
+
+    /* BRANCHING — no new verb. Pressing further out than the outermost lane is a
+       meaningless input everywhere else on the track, so at a junction it means
+       "take that fork". The outer lanes already carry LEAD and ARP, so the lanes
+       that hold the most musical value are also the ones that hold the choices. */
+    if(target === this.lane){
+      const j = this.openJunction(b);
+      if(j && ((dir===-1 && this.lane===sp.lo) || (dir===1 && this.lane===sp.hi))){
+        const pick = dir===-1 ? 'L' : 'R';
+        if(Math.abs(err) <= 0.13){
+          this.branchChoice = pick;
+          judge(pick==='L' ? '◄ BRANCH LEFT' : 'BRANCH RIGHT ►', '#e05ca8');
+          Clock.latch();
+        } else {
+          judge('MISTIMED', '#e8642a'); Clock.flam();
+        }
+      }
+      return;
+    }
+    if(Math.abs(err) <= 0.13){
+      this.lane = target; this.slide = 0;
+      judge('CLEAN', '#4fd4e4'); Clock.chime(target);
+    } else {
+      this.lane = target; this.slide = Math.sign(err || 1) * 1.0;
+      judge('SLIP', '#e8642a'); Clock.flam();
+      this.flowChain = 0; this.mult = 1;           // sloppy timing breaks the chain
+    }
+  },
+
+  jump(){ if(this.dead||!Clock.started||Clock.paused) return;
+    const b=Clock.songBeat(); if(b - this.jumpAt < 0.9) return;
+    this.jumpAt = b; Clock.noise(Clock.ctx.currentTime, 0.10, 900, 'highpass', 0.12); },
+
+  /* ── AUTORIDE ─────────────────────────────────────────────────────────
+     R drives the line perfectly. Any arrow takes the wheel back.
+
+     It plays through the SAME verbs a player uses — tryLane() and jump(), on
+     the same 8th grid, inside the same Time Traction window — rather than
+     writing lane positions directly. That matters for two reasons: it sounds
+     identical to good play (the chime, the CLEAN judge, the chain all behave
+     normally), and it cannot do anything a player could not. If autoride can
+     hit a line, the line is playable; if it visibly scrambles, the chart has a
+     walk violation that validateCharts() missed. It is a demo mode and a
+     diagnostic at once.
+
+     Perfect play is possible without lookahead cleverness: charts are verified
+     to walk, so stepping one lane toward the next note on every 8th always
+     arrives in time. */
+  auto:false, autoLast:-99,
+  toggleAuto(){
+    if(!Clock.started || Clock.paused) return;
+    this.auto = !this.auto;
+    judge(this.auto ? 'AUTORIDE' : 'AUTORIDE OFF', this.auto ? '#f5a93c' : '#7f97a8');
+    if(this.auto) Clock.latch();
+  },
+  autoStep(beat){
+    if(!this.auto || this.dead || this.down() || Clock.paused) return;
+
+    // Gates span every lane, so they are jumped rather than dodged.
+    for(const e of EVENTS){
+      if(e.done || e.t !== 'jump') continue;
+      const d = e.beat - beat;
+      if(d > 0 && d < 0.30 && !this.jumping(beat)){ this.jump(); break; }
+    }
+
+    // Aim at the next note. Hazards in the way are handled by the same rule —
+    // a hazard sitting on our lane pushes us off it if no note is pulling.
+    let want = -1, nextBeat = Infinity;
+    for(const e of EVENTS){
+      if(e.done || e.t !== 'flow' || e.beat < beat - 0.05) continue;
+      if(e.beat < nextBeat){ nextBeat = e.beat; want = e.lane; }
+    }
+    if(want < 0){
+      for(const e of EVENTS){
+        if(e.done || e.t !== 'haz') continue;
+        const d = e.beat - beat;
+        if(d > 0 && d < 0.9 && e.lane === this.hitLane())
+          want = this.lane < 2 ? this.lane + 1 : this.lane - 1;
+      }
+    }
+    if(want < 0 || want === this.lane) return;
+
+    // Act only ON the grid line, and never twice inside one 8th.
+    const grid = Math.round(beat*2)/2;
+    if(Math.abs(beat - grid) > 0.05) return;
+    if(beat - this.autoLast < 0.4) return;
+    this.autoLast = beat;
+    this.tryLane(Math.sign(want - this.lane));
+  },
+  down(){ return Clock.songBeat() < this.downedUntil; },
+
+  /* No combat verbs. slam() and fire() are both gone, along with spheres, shots
+     and the ammo economy. The direct-select experiment that briefly replaced
+     firing is gone too — ASDFG read as unnatural under the hands, and with the
+     chart rebuilt around phrases and rests there is time to walk to the note
+     with the arrows, which is what the movement was always for.
+     Moving IS playing. There is no verb for sounding a note on its own. */
+  invulnUntil:-99,
+  /* Recovery window. Without it a cluster of events can chain-hit you into a
+     spiral you cannot drive out of — you lose a gear per hit, the track keeps
+     coming, and every hit makes the next one likelier. One free beat and a half
+     is enough to re-read the lane and act. */
+  hit(reason){
+    const b = Clock.songBeat();
+    if(b < this.invulnUntil) return;
+    this.invulnUntil = b + 1.5;
+    this.shake = 1; Clock.thud();
+    this.flowChain = 0; this.mult = 1;      // the streak is the score; a hit ends it
+    Clock.setGear(Clock.gear - 1);
+    for(const s of STEMS){ if(s.key!=='drums'){ this.arm[s.key] = Math.max(0, this.arm[s.key]-0.55); } }
+    judge(reason || 'HIT', '#e8642a');
+  },
+  // Collide against what the player can SEE. Game.lane flips the instant you
+  // press, but the Saige is still easing across — using the logical lane hits
+  // you for a lane you have not visibly reached yet.
+  hitLane(){ return Math.max(0, Math.min(LANES-1, Math.round(this.laneVis))); },
+  timbreHit:{f0:0,f1:0,f2:0,f3:0,f4:0},
+  /* ── THE PUNCH ────────────────────────────────────────────────────
+     A caught note has to be an EVENT, and the old version made every one of
+     them identical: same velocity, same feedback, one after another on every
+     8th. Three things separate a punch from a strum, and all three are here.
+
+     1. ACCENT. The chart says how big this note is. A phrase head is loud,
+        bright, an octave doubled, and it ducks the whole bed underneath it —
+        the mix flinches, which is felt before it is heard. A ghost is almost
+        nothing. Same catch, three different sizes.
+     2. IMPACT. The accent drives screen shake and the orb burst, so the hit
+        lands in the eye at the same instant it lands in the ear. Feedback that
+        does not scale with the note is feedback that stops meaning anything.
+     3. THE MULTIPLIER. A streak is worth something visible and audible, and it
+        steps rather than creeps — the classic escalation, and the reason to
+        care about the note after this one.                                  */
+  mult:1, multShown:1,
+  catchFlow(b, e){
+    const acc = e ? (e.acc === undefined ? 1 : e.acc) : 1;
+
+    // consecutive only: a chain is a phrase, not a tally
+    this.flowChain = (b - this.lastFlowBeat < 2.6) ? this.flowChain + 1 : 1;
+    this.lastFlowBeat = b;
+    this.lead += ORB_BOOST * (acc >= 2 ? 1.5 : acc <= 0 ? 0.4 : 1);
+
+    // Multiplier steps at 8 / 16 / 24 links, capped at ×4.
+    const prevMult = this.mult;
+    this.mult = Math.max(1, Math.min(4, 1 + Math.floor(this.flowChain/8)));
+    if(this.mult > prevMult) Clock.multUp(this.mult);
+
+    /* The note itself. Lane is the fret; the octave rides `octUp` so the melody
+       layer's octave gesture still means something here. */
+    const lane = Math.max(0, Math.min(4, e ? e.lane : this.hitLane()));
+    const oct  = this.octUp ? 5 : 0;
+    const vel  = 0.85 + Math.min(0.15, this.flowChain*0.015);
+    Clock.strike(lane, ORB_DEG(lane) + oct, vel, undefined, acc);
+
+    this.timbreHit[STEMS[lane].key] = acc >= 2 ? 1 : acc <= 0 ? 0.35 : 0.7;
+
+    // IMPACT — scaled by the accent, so a phrase head hits the screen and a
+    // ghost does not. This is the half of "punch" that is not audio.
+    if(acc >= 2){ this.shake = Math.max(this.shake, 0.42); this.hitFlash = 1; }
+    else if(acc >= 1) this.hitFlash = Math.max(this.hitFlash, 0.45);
+    this.lastHitLane = lane; this.lastHitBeat = b;
+
+    // Every 4th link the city answers you — an alien vowel stab, rising with the
+    // chain. Still player-caused, so the sound rule holds.
+    if(this.flowChain % 4 === 0){
+      const v = Math.min(3, Math.floor(this.flowChain/4));
+      Clock.alien(Clock.ctx.currentTime, p(12 + v*2 + oct), Clock.spb()*1.6,
+                  0.16, Clock.VOW.EE, Clock.VOW.AH);
+    }
+    // Escalation: a gear every 8 links. Tempo climbs, and because node density
+    // is baked from the gear you were in, the CHART subdivides behind it too.
+    if(this.flowChain % 8 === 0) Clock.setGear(Clock.gear+1);
+  },
+  hitFlash:0, lastHitLane:2, lastHitBeat:-99
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ONE RIDER.
+
+   The Pentamorph's three Saiges are gone. Two of them were always parked, which
+   meant a third of the groove played itself — and a groove that plays itself is
+   exactly the "ubiquitous strumming" this rebuild exists to kill. Every note in
+   the song is now struck by the player or by nobody.
+
+   It also removes the last thing competing for attention. Guitar Hero has one
+   fretboard. You are not managing an ensemble; you are playing a part, and flow
+   is what happens when there is only one thing to do.
+   ══════════════════════════════════════════════════════════════════════════ */
+const RIDER = { ringA:[0.98,0.34,0.58], ringB:[0.74,0.30,0.94] };
+
+/* REFERENCE FRAME. The player is beat-locked and always sits at PLAYER_Z,
+   because the chart is addressed in beats and that must not change. "Going
+   faster" is expressed as LEAD: an offset in world units. The chart never
+   moves, so the music stays exact. */
+const ORB_BOOST = 13;      // lead gained per note, scaled by its accent
+
+/* fireShot()/stepShots() and the SHOTS pool are gone. Spheres in flight had one
+   surviving job — the "shots miss on a bend" geometry — and no shooter left to
+   fire them once the lane key became the way to sound a note. The bend still
+   matters: it is where the track's own choices live. */
+
+/* SHOVE — the shared consequence of a slam, used by player and rivals alike.
+   Pushed past lane 0 or 4 you go over the edge, and the ocean stops being
+   scenery: it is the punishment. The penalty is silence — every stem drops
+   while you are down, which in a game scored by its own mix is the worst thing
+   that can happen to you. */
+const DOWN_BEATS = 2.6;
+function shove(t, dir, beat){
+  const dest = (t.player ? Game.lane : t.lane) + dir;
+  if(dest < 0 || dest > LANES-1){
+    if(t.player){
+      Game.downedUntil = beat + DOWN_BEATS;
+      Game.downSide = dir;
+      Game.shake = 1;
+      for(const s of STEMS) Game.arm[s.key] = 0;       // the mix goes silent
+      Game.flowChain = 0; Game.mult = 1;
+      judge('OVERBOARD', '#e8642a');
+      Clock.thud();
+      Clock.noise(Clock.ctx.currentTime, 0.55, 700, 'lowpass', 0.34);
+    } else {
+      t.downedUntil = beat + DOWN_BEATS; t.downSide = dir;
+      Clock.noise(Clock.ctx.currentTime, 0.45, 600, 'lowpass', 0.22);
+    }
+    t.lead -= 70;                                      // speed reset
+  } else {
+    t.lane = dest;
+    if(t.player){ Game.lane = dest; Game.slide = dir*0.8; }
+    t.lead -= 12;
+    Clock.noise(Clock.ctx.currentTime, 0.10, 1100, 'bandpass', 0.20);
+  }
+}
+
+/* ── HUD ───────────────────────────────────────────────────────────────── */
+const mixEl = document.getElementById('mix');
+const stemEls = {};
+for(const s of STEMS){
+  const d = document.createElement('div');
+  d.className = 'stem' + (s.key==='drums' ? ' drums' : '');
+  d.innerHTML = `<div class="nm">${s.name}</div>`
+              + `<div class="tr"><div class="rv"></div><div class="fl"></div></div>`;
+  mixEl.appendChild(d);
+  stemEls[s.key] = {row:d, fill:d.querySelector('.fl'), rival:d.querySelector('.rv')};
+}
+const judgeEl = document.getElementById('judge');
+function judge(txt, col){
+  judgeEl.textContent = txt; judgeEl.style.color = col;
+  judgeEl.classList.remove('show'); void judgeEl.offsetWidth; judgeEl.classList.add('show');
+}
+const bpmEl=document.getElementById('bpm'), gearEl=document.getElementById('gear');
+const subdivEl=document.getElementById('subdiv');
+const multEl=document.getElementById('mult'), multXEl=multEl.querySelector('.x');
+const autoEl=document.getElementById('auto');
+const flowEl=document.getElementById('flow'), flowNEl=document.getElementById('flowN');
+const sectEl=document.getElementById('sect');
+const beatDots=[...document.querySelectorAll('#beats i')];
+
+/* ── input ─────────────────────────────────────────────────────────────── */
+/* ── music fader ────────────────────────────────────────────────────────
+   Independent of pause: you can leave the game running and silence it. The
+   value is applied to the master gain and survives reloads.                  */
+const volEl = document.getElementById('vol'), volVEl = document.getElementById('vol_v');
+let volume = 0.80, premuteVol = 0.80;
+try { const s = localStorage.getItem('futoryRacerVol'); if(s !== null) volume = +s; } catch(_){}
+function applyVolume(v, persist){
+  volume = Math.max(0, Math.min(1, v));
+  if(Clock.started && Clock.master) Clock.master.gain.value = volume * 0.8;
+  volEl.value = Math.round(volume*100);
+  volVEl.textContent = Math.round(volume*100);
+  if(persist){ try { localStorage.setItem('futoryRacerVol', String(volume)); } catch(_){} }
+}
+volEl.addEventListener('input', ()=> applyVolume(volEl.value/100, true));
+volEl.addEventListener('click', e=> e.stopPropagation());   // don't resume via the overlay
+function toggleMute(){
+  if(volume > 0.001){ premuteVol = volume; applyVolume(0, true); }
+  else applyVolume(premuteVol > 0.001 ? premuteVol : 0.8, true);
+}
+applyVolume(volume, false);
+
+const pauseEl = document.getElementById('pause');
+function setPause(p){
+  if(!Clock.started) return;
+  if(p) Clock.pause(); else Clock.resume();
+  pauseEl.classList.toggle('on', p);
+}
+addEventListener('keydown', e=>{
+  if(e.repeat) return;
+  const k = e.key.toLowerCase();
+  if(k==='escape'||k==='p'){ setPause(!Clock.paused); e.preventDefault(); return; }
+  if(k==='m'){ toggleMute(); e.preventDefault(); return; }
+  if(Clock.paused) return;
+  /* ONE HAND, FOUR KEYS.
+     Arrows move, space switches layer, and that is the entire scheme. The
+     direct-select row (ASDFG) was tried and cut: naming a lane by key read as
+     unnatural, and it was solving a problem — not enough time to reach the next
+     note — that the rebuilt chart solves better. Phrases with rests in them
+     give you the time. Moving is playing; there is nothing else to press.
+     Pressing outward past lane 0 or 4 is meaningless everywhere except a
+     junction, where it takes the fork, and in the melody layer, where it shifts
+     the octave. No verb of its own for either. */
+  if(k==='r'){ Game.toggleAuto(); e.preventDefault(); return; }    // autoride
+  /* ANY arrow takes the wheel back — and still performs its move, so handing
+     control back is one gesture rather than two. Placed before the arrow
+     handling below so the same keypress does both. */
+  if(Game.auto && (k==='arrowleft'||k==='arrowright'||k==='arrowup'||k==='arrowdown')){
+    Game.auto = false;
+    judge('AUTORIDE OFF', '#7f97a8');
+  }
+  if(k===' '){ Game.toggleLayer(); e.preventDefault(); return; }   // switch layer
+
+  if(Game.inMelody){
+    // Pressing UP at the top degree bumps an octave, DOWN at the bottom drops
+    // back — the same "press outward past the edge" idea the junction fork uses,
+    // so it needs no key of its own.
+    if(k==='arrowup'){
+      if(Game.lane >= LANES-1 && !Game.octUp){ Game.octUp = true; judge('OCTAVE ▲','#4fd4e4'); }
+      else Game.tryLane(+1);
+      e.preventDefault();
+    } else if(k==='arrowdown'){
+      if(Game.lane <= 0 && Game.octUp){ Game.octUp = false; judge('OCTAVE ▼','#4fd4e4'); }
+      else Game.tryLane(-1);
+      e.preventDefault();
+    }
+    return;
+  }
+  if(k==='arrowleft')       { Game.tryLane(-1); e.preventDefault(); }
+  else if(k==='arrowright') { Game.tryLane(1);  e.preventDefault(); }
+  else if(k==='arrowup'){ Game.jump(); e.preventDefault(); }
+});
+// Losing the tab mid-run must not silently desync the song.
+addEventListener('blur', ()=>{ if(Clock.started && !Clock.paused) setPause(true); });
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden && Clock.started && !Clock.paused) setPause(true); });
+pauseEl.addEventListener('click', ()=> setPause(false));
+document.getElementById('pausebtn').addEventListener('click', e=>{
+  e.stopPropagation(); setPause(!Clock.paused); });
+/* ── TOUCH ──────────────────────────────────────────────────────────────
+   Swipe left/right to move, up to jump, tap to switch layer. It mirrors the
+   keyboard exactly, which is the point: with only one system to learn there is
+   nothing the phone has to do differently. */
+let tsx=0, tsy=0, tsw=false;
+addEventListener('touchstart', e=>{ const t=e.changedTouches[0];
+  tsx=t.clientX; tsy=t.clientY; tsw=false; }, {passive:true});
+addEventListener('touchmove', e=>{
+  if(tsw || Clock.paused) return;
+  const t=e.changedTouches[0], dx=t.clientX-tsx, dy=t.clientY-tsy;
+  if(Math.hypot(dx,dy) < 26) return;
+  tsw = true;
+  if(Game.auto){ Game.auto = false; judge('AUTORIDE OFF', '#7f97a8'); }
+  const horiz = Math.abs(dx) > Math.abs(dy);
+  // Swipes are now purely the right hand's job: step, jump, octave, fork.
+  if(Game.inMelody){ if(!horiz) Game.tryLane(dy<0 ? +1 : -1); }
+  else if(horiz) Game.tryLane(dx>0?1:-1);
+  else if(dy < 0) Game.jump();
+}, {passive:true});
+// A tap switches layer — the touch equivalent of spacebar.
+addEventListener('touchend', ()=>{ if(!tsw && !Clock.paused) Game.toggleLayer(); }, {passive:true});
+
+const gate = document.getElementById('gate');
+gate.addEventListener('click', ()=>{ Clock.start(); gate.classList.add('hide'); }, {once:true});
+
+/* ── resize ────────────────────────────────────────────────────────────── */
+let W=1,H=1;
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  W = Math.max(1, Math.round(cv.clientWidth*dpr));
+  H = Math.max(1, Math.round(cv.clientHeight*dpr));
+  if(cv.width!==W || cv.height!==H){ cv.width=W; cv.height=H; makeFBO(W,H); }
+}
+addEventListener('resize', resize);
+
+/* ── frame ─────────────────────────────────────────────────────────────── */
+const NEAR=0.6, FAR=620;
+let lastRAF = performance.now();
+
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min((now-lastRAF)/1000, 0.05); lastRAF = now;
+  resize();
+
+  /* ── all state derives from the audio clock ──────────────────────── */
+  const beat = Clock.songBeat();
+  const bar  = beat/4;
+  const beatPhase = beat - Math.floor(beat);
+  const barPhase  = bar - Math.floor(bar);
+  const pulse = Math.pow(1-beatPhase, 5), barPulse = Math.pow(1-barPhase, 7);
+  const wet = Math.min(1, 0.18 + pulse*0.42 + barPulse*0.75);
+
+  const sec = routeAt(beat);
+  const travelRaw = beat*UPB;
+  const travel = ((travelRaw % 1024) + 1024) % 1024;    // bounded: see wave-field note
+  const waveT  = ((beat*Clock.spb()) % 8 + 8) % 8;
+  // Swell is capped so the sea NEVER reaches the deck. Open sections get bigger
+  // water for drama, but the track stays legible above it.
+  const swell  = sec.kind === 'open' ? 0.72 : 0.50;
+  const amp    = swell * (0.86 + 0.20*Math.sin(bar*Math.PI*2 - 1.2) + barPulse*0.16);
+
+  // Autoride steers before events resolve, so a move it makes on this beat is
+  // seen by the same catch test a player's move would be.
+  if(!Clock.paused) Game.autoStep(beat);
+
+  /* ── event resolution ────────────────────────────────────────────── */
+  for(const e of EVENTS){
+    if(e.done || e.beat > beat) continue;
+    if(e.t === 'junction'){
+      if(!e.committed){
+        // Commit the branch and materialise the next node, JUNC_LEAD beats early.
+        const n = NODES[e.ent.key];
+        const pick = Game.branchChoice || 'S';
+        e.taken = pick;
+        pushNode(n.exits[pick] || n.exits.S, pick);
+        Game.branchChoice = null;
+        e.committed = true;
+      }
+      // keep the event alive through the bend so the chosen rail stays drawn
+      if(beat > e.beat + JUNC_LEAD) e.done = true;
+      continue;
+    }
+    if(beat - e.beat > 0.5){ e.done = true; continue; }
+    if(e.t === 'haz'){
+      if(e.lane === Game.hitLane() && !Game.jumping(beat)) Game.hit('HIT — BARRIER');
+      e.done = true;
+    } else if(e.t === 'flow'){
+      if(e.lane === Game.hitLane()){ Game.catchFlow(beat, e); e.got = true; e.done = true; }
+    } else if(e.t === 'jump'){
+      // spans every lane, so no lane test — but it must be visibly a wall
+      if(!Game.jumping(beat)) Game.hit('HIT — GATE');
+      e.done = true;
+    }
+  }
+  // retire events well behind the player so EVENTS cannot grow without bound
+  if(EVENTS.length > 900){
+    for(let i=EVENTS.length-1;i>=0;i--) if(EVENTS[i].beat < beat - 40) EVENTS.splice(i,1);
+  }
+
+  /* ── stems: arm while you ride the lane, decay while you don't ──────
+     This is the whole decision loop. You cannot park in one lane and keep
+     a full mix; you have to keep circulating, and circulating is where the
+     hazards are. Playing safe literally sounds thinner.                  */
+  /* The arm/decay stem system is gone. Riding a lane no longer *sounds* it —
+     collecting an orb does. So the readout is now "which voices have you been
+     playing", a decaying trace of your own performance rather than a meter you
+     hold up by parking somewhere.
+     Rivals are silent for now: focus is the player's Saige. */
+  for(const s of STEMS)
+    Game.timbreHit[s.key] = Math.max(0, Game.timbreHit[s.key] - dt*1.5);
+  Game.stemGain.drums = Game.down() ? 0 : 1;      // overboard = total silence
+
+  // recovery: come back on the edge lane you were thrown from
+  if(Game.down()){
+    Game.laneVis += ((Game.downSide < 0 ? -1.6 : LANES-1+1.6) - Game.laneVis) * Math.min(1, dt*2.4);
+  } else if(Game.wasDown){
+    Game.lane = Game.downSide < 0 ? 0 : LANES-1;
+    Game.laneVis = Game.lane; Game.invulnUntil = beat + 2;
+    judge('RECOVERED', '#4fd4e4');
+  }
+  Game.wasDown = Game.down();
+
+  // flow decays if you stop catching
+  if(beat - Game.lastFlowBeat > 2.6){ Game.flowChain = 0; Game.mult = 1; }
+  Game.flowIntensity += (Math.min(Game.flowChain/8,1) - Game.flowIntensity) * Math.min(1, dt*4);
+  Game.shake = Math.max(0, Game.shake - dt*3.2);
+  Game.hitFlash = Math.max(0, Game.hitFlash - dt*4.5);
+
+  /* Entering a side street from an outer lane: the road narrows under you, so
+     the lane you are in stops existing. Pull in rather than dropping the player
+     off an edge that was legal a beat ago — being forced sideways by the street
+     is the read, not a punishment. */
+  if(!Game.down()){
+    const sp = laneSpanAt(beat);
+    if(Game.lane < sp.lo || Game.lane > sp.hi){
+      Game.lane = Math.max(sp.lo, Math.min(sp.hi, Game.lane));
+      Game.slide = 0;
+      judge('SIDE STREET', '#4fd4e4');
+    }
+  }
+
+  // lane visual: eased toward target, with slip overshoot bleeding off
+  Game.laneVis += (Game.lane - Game.laneVis) * Math.min(1, dt*13);
+  Game.slide *= Math.max(0, 1 - dt*4.5);
+  const cx0 = centerX(beat);
+  const px = cx0 + laneX(Game.laneVis) + Game.slide*1.5;
+  const lean = (Game.lane - Game.laneVis)*0.42 + Game.slide*0.30
+             + (centerX(beat+1.2) - cx0)*0.05;          // bank into the branch
+
+  /* ── palette: a long run from night into dawn ────────────────────── */
+  const tod = Math.min(1, Math.max(0, beat/220))*0.86 + 0.06;
+  const zenith=mixArr(PAL.night.zenith,PAL.day.zenith,tod), midC=mixArr(PAL.night.mid,PAL.day.mid,tod);
+  const horizon=mixArr(PAL.night.horizon,PAL.day.horizon,tod), sunC=mixArr(PAL.night.sun,PAL.day.sun,tod);
+  const deep=mixArr(PAL.night.deep,PAL.day.deep,tod), body=mixArr(PAL.night.body,PAL.day.body,tod);
+  const crest=mixArr(PAL.night.crest,PAL.day.crest,tod), silh=mixArr(PAL.night.silh,PAL.day.silh,tod);
+  const sunDir=mixArr(PAL.night.sunDir,PAL.day.sunDir,tod);
+  const sunUV=[0.5+sunDir[0]*0.42, 0.085];
+
+  /* ── camera: behind and above the Saige ──────────────────────────── */
+  /* ── melody layer ────────────────────────────────────────────────── */
+  // A route node of kind 'melody' arms the layer on entry/exit; the player can
+  // override with space at any time, and that override sticks until they or the
+  // next section change it.
+  const sectionWants = sec.kind === 'melody';
+  if(sectionWants !== Game.lastSectionWants){
+    Game.melodyRequest = sectionWants;
+    Game.lastSectionWants = sectionWants;
+  }
+  if(Game.togglePending >= 0 && beat >= Game.togglePending){
+    Game.melodyRequest = !Game.melodyRequest;
+    Game.togglePending = -1;
+  }
+  Game.inMelody = Game.melodyRequest;
+  Game.sideMix += ((Game.inMelody ? 1 : 0) - Game.sideMix) * Math.min(1, dt*1.7);
+  if(Game.inMelody){
+    /* No sustained voice any more. The old drone was a saw+square holding a note
+       continuously, which was simply unpleasant — and worse, it meant the game
+       made noise the player had not asked for. Altitude now only *selects* which
+       voice and pitch the next orb will strike. Silence until you play. */
+    Game.octave = Game.octUp ? 5 : 0;
+    const deg = Math.round(Math.max(0, Math.min(4, Game.laneVis)));
+    Game.noteName = ['A','C','D','E','G'][deg] + (Game.octave ? '↑' : '');
+  } else Game.noteName = '';
+
+  const bob = Math.sin(beat*Math.PI*2)*0.09 + pulse*0.14;
+  const pyBase = DECK_Y + 0.95;                    // always above water, never on it
+  // overboard: drop to the sea and ride the swell until you climb back on
+  const downT = Game.down() ? 1 - Math.max(0,(Game.downedUntil-beat)/DOWN_BEATS) : 0;
+  /* The mirror must sample the same world point the shader does, which means
+     including the track centreline — it was passing lane offset alone, so once
+     the route branched the Saige rode a different wave than the one drawn. */
+  const seaY = waveH(cx0 + laneX(Game.laneVis), PLAYER_Z+travel, waveT, amp) + 0.5;
+  // In the melody layer you FLY: altitude is your note, not your lane.
+  const flyY = altY(Math.max(0, Math.min(4, Game.laneVis))) + Game.octave*0.62;
+  const groundY = Game.down()
+    ? pyBase + (seaY - pyBase) * Math.min(1, downT*3.5)
+    : pyBase + Game.jumpY(beat);
+  // The leap arc rides on top of whichever layer you are in — it is the thing
+  // that makes "over" readable rather than "through", and it has to be visible
+  // in the melody view too, where the same gesture crosses pitches.
+  const py = groundY + (flyY - groundY) * Game.sideMix;
+  // The look-at target reads 2.4 beats ahead of the player, so on a branch the
+  // camera yaws into the turn by itself — no explicit heading to keep in sync.
+  const aheadX = centerX(beat + 2.4);
+  // Pulled back for the racer build: you need to read rivals and spheres, not
+  // just the next lane. Costs some detail up close; worth it.
+  // While overboard the camera stays with the TRACK, not with you — chasing you
+  // over the side hides the very thing you need to see happen.
+  const camLane = Math.max(0, Math.min(LANES-1, Game.laneVis));
+  const camY = Game.down() ? DECK_Y + 0.95 : py;
+  const chaseEye=[cx0 + laneX(camLane)*0.45, camY+8.4+bob, PLAYER_Z+29];
+  const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, PLAYER_Z-52];
+
+  /* SIDE VIEW. Looking along -X, so world -Z becomes screen-right: the track
+     runs off to the right and notes arrive from there, while altitude reads
+     vertically. It is the same world and the same chart — only the axis you
+     read changes, which is what makes this a layer rather than a camera trick. */
+  const sideEye=[cx0 + 46, ALT_BASE + 6.0 + bob*0.5, PLAYER_Z - 24];
+  const sideCtr=[cx0,      ALT_BASE + 5.2,           PLAYER_Z - 24];
+  const m = Game.sideMix, lerp3 = (a,b)=>[a[0]+(b[0]-a[0])*m, a[1]+(b[1]-a[1])*m, a[2]+(b[2]-a[2])*m];
+  const eye = lerp3(chaseEye, sideEye);
+  const ctr = lerp3(chaseCtr, sideCtr);
+  // Narrower FOV in side view: magnifies the staff without pulling the camera so
+  // close that you lose the beats of lookahead a rhythm game needs.
+  const fovDeg = 60 + (44 - 60)*m;
+  const asp=W/H;
+  const VP=M4.mul(M4.persp(fovDeg*Math.PI/180, asp, NEAR, FAR), M4.lookAt(eye, ctr, [0,1,0]));
+
+  /* FIT THE WORLD TO THE FRUSTUM.
+     Horizontal half-angle of the actual camera this frame. Everything that has
+     to reach the edge of the screen — the ocean sheet, the horizon city — is
+     sized from this rather than from a constant, because a constant is only
+     ever right for one window shape. The 1.22 is margin: the sheet is cheap and
+     a visible seam is not.
+     In the melody layer the camera looks along -X, so the sheet's x extent is
+     no longer what covers the screen; the floor under `Math.max` keeps it wide
+     enough there without needing a second code path. */
+  const halfFovX = Math.atan(Math.tan(fovDeg*Math.PI/360) * asp);
+  const hwSlope = Math.tan(halfFovX) * 1.22;
+  const hwBase  = Math.max(70, Math.abs(eye[2]) * hwSlope + 24);
+
+  /* ── PASS A: scene ───────────────────────────────────────────────── */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.viewport(0,0,W,H);
+  gl.clearColor(0,0,0,1);
+  // depthMask MUST be true before clear(): gl.clear() honours the write mask and
+  // the post pass leaves it false. Without this the depth buffer is cleared once
+  // and then accumulates nearest-ever depth, and moving geometry vanishes.
+  gl.depthMask(true);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.disable(gl.BLEND);
+  gl.useProgram(P_sky.p); gl.bindVertexArray(vaoEmpty);
+  gl.uniform3fv(P_sky.u.uZenith,zenith); gl.uniform3fv(P_sky.u.uMid,midC);
+  gl.uniform3fv(P_sky.u.uHorizon,horizon); gl.uniform3fv(P_sky.u.uSun,sunC);
+  gl.uniform2fv(P_sky.u.uSunUV,sunUV);
+  gl.uniform1f(P_sky.u.uTime, beat*Clock.spb()); gl.uniform1f(P_sky.u.uAspect,asp);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.depthFunc(gl.LEQUAL);
+  gl.useProgram(P_ocean.p); gl.bindVertexArray(vaoOcean);
+  gl.uniformMatrix4fv(P_ocean.u.uVP,false,VP);
+  gl.uniform1f(P_ocean.u.uTime,waveT); gl.uniform1f(P_ocean.u.uAmp,amp);
+  gl.uniform1f(P_ocean.u.uTravel,travel); gl.uniform1f(P_ocean.u.uBands,4);
+  // Centre the water under the camera. cx0 is the track centreline at the
+  // player, so this tracks branch drift exactly.
+  gl.uniform1f(P_ocean.u.uOriginX, cx0);
+  gl.uniform1f(P_ocean.u.uHwBase, hwBase);
+  gl.uniform1f(P_ocean.u.uHwSlope, hwSlope);
+  gl.uniform3fv(P_ocean.u.uDeep,deep); gl.uniform3fv(P_ocean.u.uBody,body);
+  gl.uniform3fv(P_ocean.u.uCrest,crest); gl.uniform3fv(P_ocean.u.uHorizonCol,horizon);
+  gl.uniform3fv(P_ocean.u.uSunDir,sunDir); gl.uniform3fv(P_ocean.u.uSunCol,sunC);
+  gl.drawElements(gl.TRIANGLES, oidx.length, gl.UNSIGNED_INT, 0);
+
+  /* ── objects ─────────────────────────────────────────────────────── */
+  // timber, not asphalt — the causeway is salvage built on a drowned town
+  const DECK = [0.135+0.075*tod, 0.120+0.040*tod, 0.130+0.020*tod];
+  const HALFW = LANE_W*LANES/2;               // full-width road, for reference
+
+  // causeway: only where the chart says a causeway exists
+  // The deck now exists for EVERY section — open water means exposed structure
+  // over big sea, not riding the sea. The track is always above water.
+  for(let z=26; z>-350; z-=6){          // starts behind the camera, not in front of it
+    const b = beat + (-z + PLAYER_Z)/UPB;
+    if(b < 0) continue;
+    const ent = routeAt(b);
+    const cxz = centerX(b);
+    const open = ent.kind === 'open';
+    const shade = open ? 0.78 : 1.0;
+    // Road width is per-slice, so a side street visibly narrows as it arrives.
+    const hwz = deckHalfW(b);
+    const spz = laneSpanAt(b);
+    pushInst(MESH_BOX, cxz, DECK_Y-0.2, z, hwz+0.9, 0.22, 2.9,
+             DECK[0]*shade, DECK[1]*shade, DECK[2]*shade, 0,0, 0);
+    // Lane dividers only between lanes that exist here.
+    for(let l=spz.lo+1;l<=spz.hi;l++){
+      const x = cxz + (l-2)*LANE_W - LANE_W/2;
+      pushInst(MESH_BOX, x, DECK_Y+0.03, z, 0.055, 0.03, 1.5,
+               DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12);
+    }
+    if(!open){                                          // causeway carries side rails
+      for(const sx of [-1,1])
+        pushInst(MESH_BOX, cxz + sx*(hwz+0.75), DECK_Y+0.5, z, 0.10, 0.42, 1.4,
+                 DECK[0]*1.6, DECK[1]*1.5, DECK[2]*1.5, 0,0, 0.05);
+    }
+    if(Math.round(-z) % 24 < 6){                        // legs down into the water
+      for(const sx of [-1,1])
+        pushInst(MESH_BOX, cxz + sx*(hwz+0.5), DECK_Y-3.4, z, 0.30, 3.3, 0.30,
+                 DECK[0]*0.65, DECK[1]*0.65, DECK[2]*0.65, 0,0, 0);
+    }
+  }
+
+  /* ── junction: the fork made visible ──────────────────────────────
+     Angled rails peeling off both outer edges, lit while the window is open.
+     Only the side you can actually take lights up.                          */
+  /* ── the staff ────────────────────────────────────────────────────
+     Five glowing lines at the five pitch altitudes, the one you are on lit
+     brightest. A piano roll turned into architecture: it says what the vertical
+     axis MEANS without a word of tutorial, and it fills a side view that was
+     otherwise just orbs floating in empty sky.
+     Plus vertical beams on every bar line — the Laser Catalyst motif from the
+     deck, which is exactly what a side view needs to carry rhythm. */
+  if(Game.sideMix > 0.02){
+    const sm = Game.sideMix;
+    const cur = Math.round(Math.max(0, Math.min(4, Game.laneVis)));
+    for(let l=0;l<5;l++){
+      const on = (l === cur);
+      const c = on ? [0.55,0.96,0.95] : [0.28,0.46,0.58];
+      for(let z=22; z>-300; z-=14){
+        const bb = beat + (-z + PLAYER_Z)/UPB;
+        if(bb < 0) continue;
+        pushInst(MESH_BOX, centerX(bb), altY(l), z, 0.05, 0.05, 5.4,
+                 c[0],c[1],c[2], 0,0, (on ? 0.9 : 0.28)*sm);
+      }
+    }
+    for(let bb = Math.ceil(beat/4)*4; bb < beat + 18; bb += 4){
+      const z = PLAYER_Z - (bb-beat)*UPB;
+      if(z < -300 || z > 24) continue;
+      const near2 = Math.max(0, 1 - (bb-beat)*0.5);
+      pushInst(MESH_BOX, centerX(bb), DECK_Y + 10, z, 0.09, 10, 0.09,
+               0.42,0.95,0.92, 0,0, (0.25 + 0.5*near2)*sm);
+    }
+  }
+
+  /* ── junction: the fork made visible ──────────────────────────────
+     The rails are drawn along branchX() — the exact curve the centreline will
+     follow if you take that side. The guide you see IS the path, so committing
+     produces the turn you were already looking at.
+     Before commit both sides show; after commit only the road you took.        */
+  const bj = Game.openJunction(beat);
+  for(const e of EVENTS){
+    if(e.t !== 'junction' || e.done) continue;
+    if((e.beat - beat)*UPB > 340) continue;
+    const ent = e.ent, live = (e === bj);
+    for(const sx of [-1,1]){
+      if(e.committed && e.taken !== (sx<0 ? 'L' : 'R')) continue;
+      const armed = live && ((sx<0 && Game.lane===0) || (sx>0 && Game.lane===4));
+      // Left is always the melody layer, so it is lit in the melody colour —
+      // the fork tells you what KIND of music it leads to, not just where it goes.
+      const isMel = sx < 0;
+      const g   = armed ? 1.0 : (live ? 0.5 : 0.22);
+      const col = isMel ? (armed ? [0.42,0.95,0.90] : [0.24,0.55,0.60])
+                        : (armed ? [0.98,0.38,0.68] : [0.58,0.28,0.60]);
+      for(let i=0;i<=16;i++){
+        const t  = i/16;
+        const bb = e.beat + t*JUNC_LEAD;
+        const zz = PLAYER_Z - (bb - beat)*UPB;
+        if(zz > 24 || zz < -350) continue;
+        const hx = branchX(ent, bb, sx);
+        pushInst(MESH_BOX, hx + sx*(HALFW+0.8), DECK_Y+0.45, zz,
+                 0.26, 0.50 + (armed?0.40:0), 2.4, col[0],col[1],col[2], 0,0, g*(1-t*0.35));
+      }
+      // gate post at the mouth of the fork
+      const zz0 = PLAYER_Z - (e.beat - beat)*UPB;
+      if(zz0 < 24 && zz0 > -350){
+        pushInst(MESH_BOX, ent.cx + sx*(HALFW+0.8), DECK_Y+2.1, zz0,
+                 0.22, 2.1, 0.22, col[0],col[1],col[2], 0,0, g);
+        pushInst(MESH_BOX, ent.cx + sx*(HALFW+0.8), DECK_Y+4.2, zz0,
+                 0.95, 0.16, 0.22, col[0],col[1],col[2], 0,0, g);
+      }
+    }
+  }
+
+  // chart objects
+  for(const e of EVENTS){
+    if(e.done || e.t === 'junction') continue;
+    const dz = (e.beat - beat)*UPB;
+    if(dz < -6 || dz > 340) continue;
+    const z = PLAYER_Z - dz;
+    /* A note's `lane` is an instrument in chase view and a PITCH in the melody
+       layer, so its position blends with the camera: events slide off the deck
+       and rise into the staff as the view turns. Driven by sideMix (the view),
+       not by the section kind — otherwise toggling the layer mid-section would
+       leave the notes laid out for the wrong axis. */
+    const mm = Game.sideMix;
+    const ex = centerX(e.beat) + laneX(e.lane)*(1-mm);
+    const baseY = DECK_Y + ((altY(e.lane) - 0.7) - DECK_Y)*mm;
+    if(e.t === 'haz'){
+      pushInst(MESH_BOX, ex, baseY+0.75, z, 1.15,0.75,0.55, 0.05,0.06,0.09, 0,0, 0);
+      pushInst(MESH_BOX, ex, baseY+1.45, z, 1.15,0.06,0.5, 0.91,0.35,0.16, 0,0, 0.85);
+    } else if(e.t === 'flow'){
+      /* An orb wears the colour of the fret it will sound AND the size of its
+         accent. Reading the phrase before you play it is the whole skill, and
+         it is impossible if every note looks identical — which is exactly what
+         the all-equal chart used to give you. A phrase head is unmistakable
+         from a long way off; a ghost is barely there. */
+      const ea = e.acc === undefined ? 1 : e.acc;
+      const r  = ea >= 2 ? 0.60 : ea <= 0 ? 0.19 : 0.34;
+      const bobY = Math.sin(beat*3 + e.beat)*0.16;
+      const oc = STEMS[Math.max(0,Math.min(4,e.lane))].col;
+      pushInst(MESH_SPH, ex, baseY+1.5+bobY, z, r,r,r,
+               oc[0],oc[1],oc[2], 0,0, ea >= 2 ? 1.25 : 0.95);
+      /* An accent ring was tried here and cut: MESH_TOR renders edge-on from the
+         chase camera, so it read as a vertical bar through the orb rather than a
+         halo around it, and it wrecked the silhouette. Size and glow already
+         separate the three tiers cleanly at distance — measured on screen — so
+         the ring was cost without signal. */
+    } else if(e.t === 'jump'){
+      /* A gate hits you in EVERY lane, so it must be unmissable. It used to be
+         two thin posts at the outer edges — nothing in your lane, nothing across
+         the track — which is precisely why it read as "hit for no reason".
+         It is now a full-width barrier that brightens as it approaches. */
+      const gx = centerX(e.beat);
+      const near = Math.max(0, 1 - Math.abs(dz)/140);
+      /* Fairness rule 1: a hitbox may never be wider than its art. A gate hits
+         across every lane, so it must be drawn exactly as wide as the road is
+         HERE — on a three-lane street that is narrower. */
+      const ghw = deckHalfW(e.beat);
+      pushInst(MESH_BOX, gx, baseY+1.70, z, ghw+0.8, 0.45, 0.34,
+               0.31,0.83,0.89, 0,0, 0.55 + 0.40*near);
+      pushInst(MESH_BOX, gx, baseY+0.62, z, ghw+0.8, 0.05, 0.28,
+               0.31,0.83,0.89, 0,0, 0.28 + 0.35*near);
+      for(const sx of [-1,1])
+        pushInst(MESH_BOX, gx + sx*(ghw+0.7), baseY+1.05, z, 0.24,1.05,0.32,
+                 0.31,0.83,0.89, 0,0, 0.75);
+    }
+  }
+
+  // THE SAIGE — hull plus the two Time spheres: Day (orange) and Night (blue),
+  // the same duality as the two dice in Futory Cards.
+  const pitch = -Game.jumpY(beat)*0.05;
+  /* THE SAIGE — per the deck art: a low near-black wedge riding two luminous
+     RINGS, not spheres. The Day/Night duality survives as a warm ring forward
+     and a cool ring aft, so the vehicle still carries the two Time poles. */
+  const spin = beat*Math.PI*1.6;
+  function drawSaige(sx, sy, sz, slean, spitch, ringA, ringB, dim){
+    pushInst(MESH_HULL, sx, sy+0.62, sz, 1.15,1.05,2.10,
+             0.045,0.055,0.095, spitch, slean, 0);
+    pushInst(MESH_HULL, sx, sy+0.96, sz+0.35, 0.46,0.40,0.80,
+             0.16+0.16*tod, 0.14, 0.24, spitch, slean, 0.20);
+    pushInst(MESH_BOX, sx, sy+1.02, sz-0.5, 0.05, 0.02, 0.85,
+             ringA[0],ringA[1],ringA[2], spitch, slean, 0.8*dim);
+    pushInst(MESH_TOR, sx + Math.sin(slean)*0.22, sy+0.52, sz-1.85, 0.55,0.55,0.55,
+             ringA[0],ringA[1],ringA[2], spin, slean, 0.92*dim);   // Day ring
+    pushInst(MESH_TOR, sx - Math.sin(slean)*0.22, sy+0.52, sz+1.60, 0.55,0.55,0.55,
+             ringB[0],ringB[1],ringB[2], spin, slean, 0.92*dim);   // Night ring
+  }
+  /* THE IMPACT BURST. A bright pop in the fret's own colour at the instant of
+     the catch, because a punch has to land in the eye at the same moment it
+     lands in the ear — the audio accent alone reads as "louder", not as "hit".
+
+     Two things were wrong on the first attempt and both are worth recording.
+     It used MESH_TOR, which from the chase camera renders as a solid slab
+     rather than a ring (the same reason the accent halo was cut). And it grew
+     to 4.2 units — nearly four times the width of the Saige — so it did not
+     read as an impact at all, it read as the vehicle disappearing behind a
+     wall. A burst must stay SMALLER than the thing it is decorating.
+
+     Third constraint, and the one that fixes it properly: the instanced pass
+     has blending OFF, so this is an OPAQUE ball, not a soft flash. Anything big
+     enough to sit over the Saige simply hides it, several times a bar. So the
+     burst is small and rides ABOVE and slightly ahead — where the note was, not
+     where the vehicle is. It can never occlude the thing you are steering.
+
+     Peaks at 0.75 and is gone in ~0.2s. The screen shake carries the weight on
+     accents; this only has to say *where*. */
+  if(Game.hitFlash > 0.02){
+    const hc = STEMS[Game.lastHitLane].col;
+    const u  = 1 - Game.hitFlash;                 // 0 at the strike, 1 as it dies
+    /* Raised and dimmed after seeing it on screen: at y+2.05 with glow 2.0 the
+       ball still projected over the Saige from the chase camera and blew out to
+       white, so it read as the vehicle vanishing rather than as a hit. It has to
+       clear the silhouette in SCREEN space, not just in world space. */
+    const rr = 0.30 + u*0.36;
+    pushInst(MESH_SPH, px, py + 2.95 + u*0.55, PLAYER_Z - 1.6, rr, rr, rr,
+             hc[0],hc[1],hc[2], 0, 0, Game.hitFlash*1.15);
+  }
+
+  const downRoll = Game.down() ? Game.downSide * Math.min(1.5, downT*3.0) : 0;
+  drawSaige(px, py, PLAYER_Z, lean + downRoll, pitch,
+            RIDER.ringA, RIDER.ringB, Game.down() ? 0.35 : 1);
+
+  // wind shadow — the Flow trail behind the Saige
+  // A wind shadow is calmed water, so it wants to be a WIDE soft ribbon. Scaling
+  // the width by intensity made it a hard bright hairline — intensity drives the
+  // glow instead, and the ribbon keeps its shape.
+  /* The Flow wake is GONE.
+     It rendered as a solid cyan bar hanging behind the Saige no matter how low I
+     set its last parameter — because that parameter is GLOW (emissive strength),
+     not alpha. Objects are drawn opaque: blending is off for the instanced pass.
+     There is no way to fade an object out with `glow`, only to stop drawing it.
+     A cosmetic trail is not worth an alpha-blended render path, so it is cut. */
+
+  gl.useProgram(P_obj.p);
+  gl.uniformMatrix4fv(P_obj.u.uVP,false,VP);
+  gl.uniform3fv(P_obj.u.uSunDir,sunDir);
+  gl.uniform3fv(P_obj.u.uHorizonCol,horizon);
+  gl.uniform1f(P_obj.u.uBands,4);
+  drawMesh(MESH_BOX); drawMesh(MESH_SPH); drawMesh(MESH_HULL); drawMesh(MESH_TOR);
+
+  // horizon silhouettes
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(P_silh.p); gl.bindVertexArray(vaoQuad);
+  gl.uniformMatrix4fv(P_silh.u.uVP,false,VP);
+  gl.uniform3fv(P_silh.u.uSilh,silh); gl.uniform3fv(P_silh.u.uHorizonCol,horizon);
+  gl.activeTexture(gl.TEXTURE0); gl.uniform1i(P_silh.u.uTex,0);
+  for(const s of SILH){
+    gl.bindTexture(gl.TEXTURE_2D, s.tex);
+    // Ride the centreline, and fit the backdrop layer to the frustum at its own
+    // depth so it reaches both edges at any aspect ratio.
+    SILH_POS[0] = cx0 + s.pos[0]; SILH_POS[1] = s.pos[1]; SILH_POS[2] = s.pos[2];
+    SILH_SIZE[1] = s.size[1];
+    SILH_SIZE[0] = s.cover
+      ? Math.max(s.size[0], (Math.abs(s.pos[2]) + Math.abs(eye[2])) * hwSlope * 2)
+      : s.size[0];
+    gl.uniform3fv(P_silh.u.uPos, SILH_POS); gl.uniform2fv(P_silh.u.uSize, SILH_SIZE);
+    gl.uniform1f(P_silh.u.uFog, s.fog);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  }
+  gl.disable(gl.BLEND);
+
+  /* ── PASS B: watercolor ──────────────────────────────────────────── */
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.viewport(0,0,W,H);
+  gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+  gl.useProgram(P_post.p); gl.bindVertexArray(vaoEmpty);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,texColor); gl.uniform1i(P_post.u.uColor,0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,texDepth); gl.uniform1i(P_post.u.uDepth,1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,texPaper); gl.uniform1i(P_post.u.uPaperTex,2);
+  gl.uniform2f(P_post.u.uPaperScale, W/PAPER_N, H/PAPER_N);
+  gl.uniform2f(P_post.u.uTexel, 1/W, 1/H);
+  gl.uniform1f(P_post.u.uWet, wet);
+  gl.uniform1f(P_post.u.uShake, Game.shake);
+  gl.uniform1f(P_post.u.uNear,NEAR); gl.uniform1f(P_post.u.uFar,FAR);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.bindVertexArray(null);
+
+  /* ── HUD ─────────────────────────────────────────────────────────── */
+  for(const s of STEMS){
+    const el = stemEls[s.key];
+    const v = Game.timbreHit[s.key];
+    el.fill.style.width = (v*100).toFixed(0)+'%';
+    const c = s.col;
+    el.fill.style.background = `rgb(${(c[0]*255)|0},${(c[1]*255)|0},${(c[2]*255)|0})`;
+    el.row.classList.toggle('latched', v > 0.05);
+    el.row.classList.toggle('here', Game.hitLane() === s.lane);
+  }
+  bpmEl.textContent = Clock.bpm;
+  gearEl.textContent = Clock.gear+1;
+  subdivEl.textContent = Game.inMelody ? (Game.noteName || '—') : SUBDIV[sec.tier || 0];
+
+  // In the melody layer you are playing a line, not arming stems — the mix panel
+  // recedes rather than sitting on top of the Saige.
+  mixEl.style.opacity = (1 - Game.sideMix*0.78).toFixed(2);
+  mixEl.style.transform = `translateY(-50%) translateX(${(-Game.sideMix*8).toFixed(0)}px)`;
+
+
+  /* THE MULTIPLIER readout. It only appears once you have one, so an empty run
+     has an empty HUD and the escalation reads as something you switched on
+     rather than a meter that was always there. */
+  if(Game.mult !== Game.multShown){
+    multXEl.textContent = '\u00d7' + Game.mult;
+    multEl.classList.remove('bump'); void multEl.offsetWidth;
+    if(Game.mult > Game.multShown) multEl.classList.add('bump');
+    Game.multShown = Game.mult;
+  }
+  multEl.classList.toggle('on', Game.mult > 1 && !Clock.paused);
+  autoEl.classList.toggle('on', Game.auto && !Clock.paused);
+  flowNEl.textContent = Game.flowChain;
+  flowEl.classList.toggle('on', Game.flowChain > 1);
+  sectEl.textContent = Clock.started
+    ? (bj ? '◄ lane 0 + LEFT = melody          ·          lane 4 + RIGHT = arrangement ►'
+          : TRACK_NAME + '  ·  ' + sec.name
+            + (Game.inMelody ? '  ·  ↑↓ = pitch  ·  again at the ends = octave'
+                             : (Game.mult > 1 ? '  ·  ×' + Game.mult : '')))
+    : '';
+  const bi = ((Math.floor(beat)%4)+4)%4;
+  for(let i=0;i<4;i++)
+    beatDots[i].style.background = (Clock.started && i===bi)
+      ? `rgba(223,234,242,${(0.35+pulse*0.65).toFixed(2)})` : 'rgba(127,151,168,.22)';
+}
+resize();
+requestAnimationFrame(frame);
+</script>
