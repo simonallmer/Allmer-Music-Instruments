@@ -1111,15 +1111,45 @@ const Clock = {
     this.ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
     this.master = this.ctx.createGain(); this.master.gain.value = volume * 0.8;
     const comp = this.ctx.createDynamicsCompressor();
-    comp.threshold.value = -14; comp.ratio.value = 4;
+    comp.threshold.value = -11; comp.ratio.value = 5;
+    comp.attack.value = 0.004; comp.release.value = 0.14;   // let transients through, then clamp
     this.master.connect(comp).connect(this.ctx.destination);
 
     /* SIDECHAIN. Everything except the kick passes through `duck`, and every
        kick slams it down and lets it breathe back over ~200ms. That pump IS the
        four-to-the-floor sound — without it a house track is just a loud kick
        with things next to it. */
-    this.duck = this.ctx.createGain(); this.duck.gain.value = 1;
-    this.duck.connect(this.master);
+    /* DRIVE. Soft-clip saturation, and the single biggest reason the kit hits
+       instead of merely being loud. There was none of this before: every voice
+       ran clean into a compressor, which controls level but adds no weight.
+       Saturation adds harmonics above the fundamental, which is what makes a
+       drum read as SOLID on small speakers and as force on big ones.
+       Two stages, because the kick must not be squashed by the same curve that
+       glues everything else: the kit runs hot through `drive`, the kick runs
+       through its own gentler `kickDrive` straight to master so it stays the
+       cleanest, biggest thing in the mix. */
+    this.drive     = this.shaper(2.6);
+    this.kickDrive = this.shaper(1.5);
+    this.drive.connect(this.master);
+    this.kickDrive.connect(this.master);
+
+    /* TWO SIDECHAINS, and the split is load-bearing.
+
+       `duck` carries the BED. `kitDuck` carries the player's notes.
+
+       They were one bus, and that was a bug worth spelling out: an accent ducks
+       the mix, the player's notes were IN the mix, so every accent attenuated
+       itself. Measured before the split — accents came out QUIETER than normal
+       notes on four of the five lanes (E bell: 0.506 normal vs 0.425 accent).
+       The single loudest thing in the design was being throttled by its own
+       sidechain, which is the exact opposite of "every point is a punch".
+
+       Now: the bed ducks hard for the kick and flinches again for your accents.
+       Your kit ducks only gently, only for the kick, and never for itself. */
+    this.duck    = this.ctx.createGain(); this.duck.gain.value = 1;
+    this.kitDuck = this.ctx.createGain(); this.kitDuck.gain.value = 1;
+    this.duck.connect(this.drive);
+    this.kitDuck.connect(this.drive);
 
     /* One bus per voice, PANNED TO ITS LANE. The left lane sounds left — you
        hear the five voices laid out in the same space you see them in. */
@@ -1129,8 +1159,8 @@ const Clock = {
       if(this.ctx.createStereoPanner){
         const pan = this.ctx.createStereoPanner();
         pan.pan.value = (s.lane - 2)/2 * 0.7;
-        g.connect(pan).connect(this.duck);
-      } else g.connect(this.duck);
+        g.connect(pan).connect(this.kitDuck);
+      } else g.connect(this.kitDuck);
       this.bus[s.key] = g;
     }
 
@@ -1139,11 +1169,17 @@ const Clock = {
        makes sparse playing sound full instead of empty, which matters enormously
        now that the ONLY notes are the ones the player collects. */
     const c = this.ctx;
-    this.fx = c.createGain(); this.fx.gain.value = 0.34;
+    /* Pulled WAY back. At 0.34 send with 0.42 feedback this delay smeared every
+       hit into the next one — the main reason the old kit sounded ephemeral
+       rather than percussive. Drums need air around them, not a tail lying on
+       top of them. It is still here, because the flooded hall is the world and
+       sparse playing should not sound dead, but it is now an effect the drums
+       sit in FRONT of rather than inside. */
+    this.fx = c.createGain(); this.fx.gain.value = 0.15;
     this.dly = c.createDelay(2.0);
     this.dly.delayTime.value = this.spb()*0.75;          // dotted 8th
-    const fb = c.createGain(); fb.gain.value = 0.42;
-    const damp = c.createBiquadFilter(); damp.type='lowpass'; damp.frequency.value = 1900;
+    const fb = c.createGain(); fb.gain.value = 0.24;
+    const damp = c.createBiquadFilter(); damp.type='lowpass'; damp.frequency.value = 1500;
     this.fx.connect(this.dly);
     this.dly.connect(damp); damp.connect(fb); fb.connect(this.dly);
     damp.connect(this.duck);                       // echoes pump with everything else
@@ -1226,90 +1262,138 @@ const Clock = {
     o.stop(t+dur+0.1); sub.stop(t+dur+0.1); lfo.stop(t+dur+0.1);
   },
 
-  /* ── FIVE FRETS, ONE INSTRUMENT ─────────────────────────────────────
-     This replaces the five-drum-kit model, and the reason is the whole point of
-     this rebuild.
+  /* ── THE KIT: TUNED 808s ────────────────────────────────────────────
+     Two earlier versions of this were wrong in opposite directions, and the
+     third has to satisfy both complaints at once.
 
-     Before: lane 0..4 were KICK, SUB, CLAP, BELL, HAT — five unrelated
-     percussion sounds, one orb on every 8th, every one at the same velocity.
-     That is why catching read as *strumming*. A stream of undifferentiated
-     hits has no melodic contour to follow and no dynamic shape to anticipate,
-     so there is nothing to be in flow WITH. Each note was interchangeable, and
-     interchangeable notes cannot land.
+     v1 was five unrelated drum sounds on every 8th at one velocity. That read
+     as strumming: no contour to follow, no dynamics, every note the same note.
+     v2 replaced them with a filtered saw/square lead stab. That fixed the
+     contour and killed the punch — a filter-swept synth stab is ephemeral, it
+     does not HIT, and drowned in a dotted-8th delay it sounded like an ambient
+     pad with a rhythm game attached.
 
-     Now: the five lanes are five PITCHES of a single lead voice, exactly the
-     way five frets are five notes of one guitar. A run of orbs is a riff. It
-     has direction — up, down, a leap and a return — so you can hear the shape
-     of a phrase coming and play into it. That is the thing Guitar Hero has that
-     this did not.
+     The synthesis of both: an 808 kit is PERCUSSIVE AND TUNED. That is the
+     whole trick of the machine and the reason it defined a genre. A 909 kick,
+     an 808 tom, a cowbell — every one of them is a pitched body with a hard
+     transient on the front. So the five lanes stay five pitches (runs keep
+     their contour, phrases keep their shape) and each one gets a real drum body
+     that lands like a fist.
 
-     The voice is a STAB: saw + detuned square + sub, a hard filter envelope,
-     and a noise transient on the attack that does the work a pick does. Short,
-     so it punches and gets out of the way of the next one.
-
-     `acc` is the accent tier and it is what makes a point a punch:
-       0  ghost   — quiet, filtered down, barely there
-       1  normal  — the body of a phrase
-       2  ACCENT  — phrase heads and downbeats: louder, brighter, longer, an
-                    octave doubling, a harder transient, and it ducks the bed
-                    so the whole mix flinches around it
-     A chart of all-1s would sound exactly as flat as the old one. The accents
-     are the music.                                                          */
+     What makes them hit, in order of how much it matters:
+       1. TRANSIENT. A click/noise burst in the first few ms. Punch is attack.
+       2. PITCH ENVELOPE. A fast drop into the fundamental — that downward
+          swoop is what an 808 IS, and it reads as impact, not as a note.
+       3. DRIVE. Everything runs through a soft-clip waveshaper. Saturation is
+          the difference between loud and hard.
+       4. DRY. The delay send is a fraction of what it was; drums need air
+          around them, not a tail smeared over the next one.                  */
   strike(lane, deg, vel, at, acc){
     if(!this.started) return;
     const c = this.ctx, t = (at === undefined ? c.currentTime : Math.max(at, c.currentTime));
-    const s = STEMS[lane]; if(!s) return;
-    const dest = this.bus[s.key];
+    const st = STEMS[lane]; if(!st) return;
+    const dest = this.bus[st.key];
     const f = p(deg);
     const v = vel === undefined ? 1 : vel;
     const A = acc === undefined ? 1 : acc;
 
-    // Accent shaping. One table, so the three tiers stay obviously related and
-    // nobody has to reverse-engineer the numbers later.
-    const amp   = A >= 2 ? 0.62*v : A <= 0 ? 0.13*v : 0.34*v;
-    const dec   = A >= 2 ? 0.52   : A <= 0 ? 0.14   : 0.30;
-    const open  = A >= 2 ? 9.5    : A <= 0 ? 2.2    : 5.0;   // filter env top, x f
-    const crack = A >= 2 ? 0.30   : A <= 0 ? 0.04   : 0.14;  // pick transient
+    // Accent shaping, one table so the three tiers stay obviously related.
+    const gain  = A >= 2 ? 1.00*v : A <= 0 ? 0.22*v : 0.55*v;
+    const len   = A >= 2 ? 1.35   : A <= 0 ? 0.45   : 0.85;   // multiplier on decay
+    const snap  = A >= 2 ? 1.00   : A <= 0 ? 0.18   : 0.52;   // transient level
+    const send  = A >= 2 ? 0.20   : 0.10;                     // delay send, kept low
 
-    const g  = c.createGain();
-    const lp = c.createBiquadFilter();
-    lp.type = 'lowpass'; lp.Q.value = A >= 2 ? 7 : 4.5;
-    lp.frequency.setValueAtTime(Math.min(15000, f*open), t);
-    lp.frequency.exponentialRampToValueAtTime(Math.max(180, f*1.7), t + dec*0.85);
+    const tail = (node, amt) => { const g=c.createGain(); g.gain.value=amt*gain;
+                                  node.connect(g); g.connect(this.fx); };
 
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(amp, t + 0.004);      // near-instant attack
-    g.gain.exponentialRampToValueAtTime(amp*0.28, t + dec*0.34);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dec);
-
-    const mk = (type, freq, det, lvl) => {
-      const o = c.createOscillator(); o.type = type;
-      o.frequency.value = freq; o.detune.value = det;
-      const og = c.createGain(); og.gain.value = lvl;
-      o.connect(og).connect(lp);
-      o.start(t); o.stop(t + dec + 0.06);
+    /* A tuned percussive body: oscillator with a fast pitch drop into the
+       fundamental, hard attack, exponential tail. This is the 808 primitive and
+       four of the five lanes are built from it. */
+    const body = (type, mult, dropTo, dec, lvl, out) => {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(f*mult, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(24, f*dropTo), t + dec*0.28);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(lvl*gain, t + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dec);
+      o.connect(g).connect(out);
+      o.start(t); o.stop(t + dec + 0.05);
+      return g;
     };
-    mk('sawtooth', f,     0,   0.85);
-    mk('square',   f,    +8,   0.40);          // detune = width, not chorus
-    mk('sine',     f/2,   0,   0.55);          // sub, so a low fret still has body
-    if(A >= 2) mk('sawtooth', f*2, -6, 0.26);  // accents ring an octave up
 
-    lp.connect(g).connect(dest);
-    const sg = c.createGain(); sg.gain.value = A >= 2 ? 0.55 : 0.30;
-    g.connect(sg); sg.connect(this.fx);
+    if(lane === 0){
+      /* A — THE BOOM. An 808 kick tuned to the root: long sine tail, big pitch
+         drop, beater click on top. Straight to the kick drive, never ducked,
+         because it is what everything else ducks against. */
+      const dec = 0.62*len;
+      const g = body('sine', 3.4, 0.52, dec, 1.25, this.kickDrive);
+      this.noise(t, 0.011, 2200, 'highpass', 0.42*snap, this.kickDrive);  // beater
+      tail(g, 0.10);
+    } else if(lane === 1){
+      /* C — 808 TOM. Same primitive, shorter and brighter, with a triangle
+         layer so it reads as a drum rather than a sub. */
+      const dec = 0.34*len;
+      const g = body('sine',     2.6, 1.0, dec, 0.85, dest);
+      body('triangle', 1.0, 1.0, dec*0.55, 0.30, dest);
+      this.noise(t, 0.008, 2600, 'highpass', 0.24*snap, dest);
+      tail(g, 0.16);
+    } else if(lane === 2){
+      /* D — 808 SNARE. Tuned shell plus a noise crack. The crack is most of
+         what you hear and all of what you feel. */
+      const dec = 0.26*len;
+      body('triangle', 1.0, 1.0, dec, 0.42, dest);
+      body('triangle', 1.5, 1.0, dec*0.7, 0.22, dest);
+      const nz = c.createGain(); nz.gain.value = 1; nz.connect(dest);
+      this.noise(t,         0.020, 1900, 'bandpass', 0.75*snap, nz);
+      this.noise(t + 0.004, 0.09,  2600, 'highpass', 0.34*snap, nz);
+      tail(nz, 0.18);
+    } else if(lane === 3){
+      /* E — 808 COWBELL. Two squares at the machine's own 1.4833 inharmonic
+         ratio through a bandpass. Tuned so the fundamental is the degree, so it
+         is a cowbell AND a note. */
+      const dec = 0.30*len;
+      const a = c.createOscillator(), b = c.createOscillator();
+      const bp = c.createBiquadFilter(), g = c.createGain();
+      a.type='square'; b.type='square';
+      a.frequency.value = f*1.5; b.frequency.value = f*1.5*1.4833;
+      bp.type='bandpass'; bp.frequency.value = f*2.4; bp.Q.value = 2.0;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.80*gain, t + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.16*gain, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dec);
+      a.connect(bp); b.connect(bp); bp.connect(g).connect(dest);
+      a.start(t); b.start(t); a.stop(t+dec+0.05); b.stop(t+dec+0.05);
+      this.noise(t, 0.006, 4000, 'highpass', 0.20*snap, dest);
+      tail(g, 0.22);
+    } else {
+      /* G — 808 HAT / RIDE. Six inharmonic squares, tight and bright, plus a
+         tuned ping high up so the top lane still carries a pitch you can
+         follow rather than just being "the noisy one". */
+      const dec = 0.16*len;
+      const ratios = [1, 1.2312, 1.342, 1.6532, 1.9523, 2.1523];
+      const hp = c.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 6200;
+      const bp = c.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.value = f*5; bp.Q.value = 1.2;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(1.05*gain, t + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dec);
+      for(const r of ratios){
+        const o = c.createOscillator(); o.type='square';
+        o.frequency.value = 320*r; o.connect(bp); o.start(t); o.stop(t + dec + 0.03);
+      }
+      bp.connect(hp).connect(g).connect(dest);
+      body('sine', 4.0, 4.0, dec*1.5, 0.26, dest);      // the tuned ping
+      tail(g, 0.20);
+    }
 
-    // THE PICK. A tiny bandpassed noise burst at the attack. This is most of
-    // what "punch" actually is — the transient, not the level.
-    if(crack > 0.05) this.noise(t, 0.018, Math.min(9000, f*7), 'bandpass', crack, dest);
-
-    /* An accent FLINCHES the bed. The sidechain used to belong to the lane-0
-       orb, which meant the pump only happened when the chart went low. Tying it
-       to the accent instead means the mix breathes with the PHRASING — every
-       phrase head pumps, wherever it sits on the neck. */
+    /* An accent FLINCHES the bed — the mix breathes with the PHRASING, so every
+       phrase head pumps wherever it sits on the neck. */
     if(A >= 2){
-      const D = this.duck;
+      const D = this.duck;                       // the BED, never the kit itself
       D.gain.cancelScheduledValues(t);
-      D.gain.setValueAtTime(0.46, t);
+      D.gain.setValueAtTime(0.42, t);
       D.gain.exponentialRampToValueAtTime(1.0, t + Math.min(0.20, this.spb()*0.5));
     }
   },
@@ -1323,6 +1407,16 @@ const Clock = {
     }
   },
 
+  /* Soft-clip curve. tanh normalised so unity in stays roughly unity out —
+     this is drive, not a volume boost, and the two must not be confused or the
+     mix just gets louder and no harder. */
+  shaper(amount){
+    const n = 2048, curve = new Float32Array(n), k = Math.tanh(amount);
+    for(let i=0;i<n;i++){ const x = (i/(n-1))*2 - 1; curve[i] = Math.tanh(x*amount)/k; }
+    const ws = this.ctx.createWaveShaper();
+    ws.curve = curve; ws.oversample = '4x';
+    return ws;
+  },
   env(t, a, d, peak){ const g=this.ctx.createGain();
     g.gain.setValueAtTime(0.0001,t);
     g.gain.exponentialRampToValueAtTime(peak, t+a);
@@ -1404,33 +1498,60 @@ const Clock = {
        Everything except the kick runs through `duck`, so the floor pumps.      */
     const K = D;                                   // everything ducked but the kick
 
-    // KICK — four to the floor, straight to master. It IS the duck.
+    /* KICK — four to the floor, through its own drive straight to master. It
+       IS the duck. Longer and deeper than before, with a real pitch drop from
+       190 rather than 112: the old one was a polite thump, this one moves air.
+       A second sub layer under it carries the weight that small speakers turn
+       into thump and big ones turn into chest. */
     if(s16 % 4 === 0){
       const o = c.createOscillator(), g = c.createGain();
       o.type = 'sine';
-      o.frequency.setValueAtTime(112, t);
-      o.frequency.exponentialRampToValueAtTime(43, t + 0.055);
+      o.frequency.setValueAtTime(190, t);
+      o.frequency.exponentialRampToValueAtTime(41, t + 0.075);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.92, t + 0.004);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
-      o.connect(g).connect(this.master);
-      o.start(t); o.stop(t + 0.34);
-      this.noise(t, 0.010, 2600, 'highpass', 0.20, this.master);
+      g.gain.exponentialRampToValueAtTime(1.30, t + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.44);
+      o.connect(g).connect(this.kickDrive);
+      o.start(t); o.stop(t + 0.48);
+      const sub = c.createOscillator(), sg = c.createGain();
+      sub.type='sine'; sub.frequency.setValueAtTime(52, t);
+      sg.gain.setValueAtTime(0.0001, t);
+      sg.gain.exponentialRampToValueAtTime(0.55, t + 0.010);
+      sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
+      sub.connect(sg).connect(this.kickDrive);
+      sub.start(t); sub.stop(t + 0.34);
+      this.noise(t, 0.009, 3200, 'highpass', 0.30, this.kickDrive);   // beater click
+      const pump = Math.min(0.22, this.spb()*0.55);
       D.gain.cancelScheduledValues(t);
-      D.gain.setValueAtTime(0.34, t);
-      D.gain.exponentialRampToValueAtTime(1.0, t + Math.min(0.22, this.spb()*0.55));
+      D.gain.setValueAtTime(0.30, t);
+      D.gain.exponentialRampToValueAtTime(1.0, t + pump);
+      // The kit pumps too — house breathes — but only gently, so your own note
+      // never disappears underneath the floor that is supposed to support it.
+      const KD = this.kitDuck;
+      KD.gain.cancelScheduledValues(t);
+      KD.gain.setValueAtTime(0.74, t);
+      KD.gain.exponentialRampToValueAtTime(1.0, t + pump*0.8);
     }
 
-    // CLAP — 2 and 4, three smeared bursts like a real clap machine.
+    /* CLAP + SNARE on 2 and 4. The clap alone was too soft to answer a kick
+       this size, so it now sits on a tuned 808 shell — the backbeat has to land
+       as hard as the downbeat or the groove limps. */
     if(s16 === 4 || s16 === 12){
-      for(let i=0;i<3;i++) this.noise(t + i*0.009, 0.045, 1700, 'bandpass', 0.30, K);
-      this.noise(t + 0.020, 0.16, 1250, 'bandpass', 0.17, K);
+      for(let i=0;i<3;i++) this.noise(t + i*0.009, 0.045, 1700, 'bandpass', 0.42, K);
+      this.noise(t + 0.020, 0.15, 2400, 'highpass', 0.26, K);
+      const sn = c.createOscillator(), sg2 = c.createGain();
+      sn.type='triangle'; sn.frequency.setValueAtTime(220, t);
+      sn.frequency.exponentialRampToValueAtTime(160, t + 0.06);
+      sg2.gain.setValueAtTime(0.0001, t);
+      sg2.gain.exponentialRampToValueAtTime(0.40, t + 0.003);
+      sg2.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      sn.connect(sg2).connect(K); sn.start(t); sn.stop(t + 0.20);
     }
 
     // OPEN HAT on the offbeat 8ths — the "tss" that makes it move.
-    if(s16 % 4 === 2) this.noise(t, 0.075, 8200, 'highpass', 0.10, K);
-    // CLOSED HAT / shaker on the 16ths between, quiet, for forward motion.
-    else if(s16 % 2 === 1) this.noise(t, 0.016, 9500, 'highpass', 0.045, K);
+    if(s16 % 4 === 2) this.noise(t, 0.070, 8200, 'highpass', 0.15, K);
+    // CLOSED HAT / shaker on the 16ths between, for forward motion.
+    else if(s16 % 2 === 1) this.noise(t, 0.014, 9500, 'highpass', 0.075, K);
 
     /* OFFBEAT BASS — lands in the holes the kick leaves, which is the other half
        of why house moves. Root note of the bar, so it never fights the lead:
@@ -1443,10 +1564,10 @@ const Clock = {
       lp.frequency.setValueAtTime(bf*7, t);
       lp.frequency.exponentialRampToValueAtTime(bf*2.2, t + 0.13);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.30, t + 0.006);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.20);
+      g.gain.exponentialRampToValueAtTime(0.46, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
       o.connect(lp).connect(g).connect(K);
-      o.start(t); o.stop(t + 0.24);
+      o.start(t); o.stop(t + 0.26);
     }
 
     // ALIEN CHOIR — one long morphing vowel every 4 bars, low in the mix.
