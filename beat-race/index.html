@@ -186,6 +186,17 @@
     #sect{left:56px;right:56px;font-size:8px;letter-spacing:.13em;line-height:1.6}
     #mult .x{font-size:30px}
     #auto{bottom:56px;font-size:8px;letter-spacing:.18em;padding:5px 11px} }
+
+  /* NO AUTORIDE BADGE ON A TOUCH DEVICE. It says "arrow key to take over",
+     which is advice for hardware the phone does not have, and it sits in the
+     bottom third of the screen — exactly where the thumb lives and where the
+     status line already is. On a small screen it stopped reading as a
+     signpost and started reading as a warning about something being wrong.
+
+     Matched on `.on` rather than the bare id, because `#auto.on` is a more
+     specific selector than `#auto` and would otherwise win. Coarse pointer
+     only: on a desktop the badge is doing its job and stays. */
+  @media (hover:none) and (pointer:coarse){ #auto, #auto.on{display:none} }
 </style>
 
 <canvas id="c"></canvas>
@@ -3767,7 +3778,15 @@ function gEnd(x, y, tap){
   if(now - gt0 > 300) return;                       // a press, not a tap
   if(now - lastTap < 320 && Math.hypot(x - lastTapX, y - lastTapY) < 60){
     lastTap = 0;
-    if(Game.auto){ Game.auto = false; judge('AUTORIDE OFF', '#7f97a8'); }
+    /* AND IT DOES NOT TAKE THE WHEEL. A double tap changes which VIEW you are
+       watching from; it is not a move, and it is the one gesture on touch that
+       has no keyboard equivalent that drops autoride either — space switches
+       the layer and leaves it running. Killing autoride here meant you could
+       not watch the demo in both views without restarting it, and the thing
+       that stopped it was a gesture that steers nothing.
+
+       Every gesture that actually MOVES you still takes over: swipe() drops
+       autoride, and so does every arrow pad, because those are the wheel. */
     Game.toggleLayer();                             // double tap = switch view
     tdbg('double tap → view');
   } else {
