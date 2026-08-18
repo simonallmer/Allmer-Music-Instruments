@@ -508,18 +508,30 @@ layout(location=1) in vec3 aNrm;
 layout(location=2) in vec3 iPos;
 layout(location=3) in vec3 iScale;
 layout(location=4) in vec3 iCol;
-layout(location=5) in vec2 iRot;    // x = pitch (wheelie), y = roll (lean)
+layout(location=5) in vec3 iRot;    // x = pitch (wheelie), y = roll (lean), z = yaw
 layout(location=6) in float iGlow;
 uniform mat4 uVP;
+uniform vec3 uCam;
 out vec3 vN; out vec3 vCol; out float vGlow; out float vDist;
 void main(){
   float cp=cos(iRot.x), sp=sin(iRot.x), cr=cos(iRot.y), sr=sin(iRot.y);
+  float cy=cos(iRot.z), sy=sin(iRot.z);
   mat3 RX = mat3(1.,0.,0.,  0.,cp,sp,  0.,-sp,cp);
   mat3 RZ = mat3(cr,sr,0., -sr,cr,0.,  0.,0.,1.);
-  mat3 R = RZ * RX;
+  /* YAW. New, and the reason a corner is drawable at all: a kerb, a lane
+     divider or a building on a street running east-west has to be square to
+     THAT street, not to the one you happen to be on. Applied innermost so it
+     turns the object about its own axis before the lean and wheelie ride on
+     top of it. */
+  mat3 RY = mat3(cy,0.,-sy,  0.,1.,0.,  sy,0.,cy);
+  mat3 R = RZ * RX * RY;
   vec3 wp = R * (aPos * iScale) + iPos;
   vN = normalize(R * aNrm);
-  vCol = iCol; vGlow = iGlow; vDist = -wp.z;
+  /* FOG BY DISTANCE FROM THE CAMERA, not by -z. On a straight track the two
+     agree and this changed nothing; around a corner they do not, and the old
+     one made the street you are turning INTO clearer than the one you are on,
+     because its geometry sits off to the side at a small -z. */
+  vCol = iCol; vGlow = iGlow; vDist = length(wp - uCam);
   gl_Position = uVP * vec4(wp, 1.0);
 }`;
 
@@ -656,7 +668,7 @@ gl.bindVertexArray(null);
 const vaoEmpty = gl.createVertexArray();
 
 /* ── instanced mesh helper ─────────────────────────────────────────────── */
-const INST_FLOATS = 12;                                   // pos3 scale3 col3 rot2 glow1
+const INST_FLOATS = 13;                                   // pos3 scale3 col3 rot3 glow1
 function makeMesh(pos, nrm, idxArr, maxInst){
   const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
   const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
@@ -670,7 +682,7 @@ function makeMesh(pos, nrm, idxArr, maxInst){
   const inb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, inb);
   gl.bufferData(gl.ARRAY_BUFFER, maxInst*INST_FLOATS*4, gl.DYNAMIC_DRAW);
   const S = INST_FLOATS*4;
-  const at = [[2,3,0],[3,3,12],[4,3,24],[5,2,36],[6,1,44]];
+  const at = [[2,3,0],[3,3,12],[4,3,24],[5,3,36],[6,1,48]];
   for(const [loc,size,off] of at){
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, size, gl.FLOAT, false, S, off);
@@ -680,11 +692,14 @@ function makeMesh(pos, nrm, idxArr, maxInst){
   return { vao, inb, count: idxArr.length, data: new Float32Array(maxInst*INST_FLOATS),
            n: 0, max: maxInst };
 }
-function pushInst(m, x,y,z, sx,sy,sz, r,g,b, pitch,roll, glow){
+/* `yaw` is last and optional, so every call site written before the city had
+   corners still reads correctly and still means "square to the camera". */
+function pushInst(m, x,y,z, sx,sy,sz, r,g,b, pitch,roll, glow, yaw){
   if(m.n >= m.max) return;
   const d = m.data, o = m.n*INST_FLOATS;
   d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=sx; d[o+4]=sy; d[o+5]=sz;
-  d[o+6]=r; d[o+7]=g; d[o+8]=b; d[o+9]=pitch; d[o+10]=roll; d[o+11]=glow;
+  d[o+6]=r; d[o+7]=g; d[o+8]=b; d[o+9]=pitch; d[o+10]=roll; d[o+11]=yaw||0;
+  d[o+12]=glow;
   m.n++;
 }
 function drawMesh(m){
@@ -1349,6 +1364,27 @@ function pathInto(b, out){
   return out;
 }
 const PATH_A = {x:0,z:0,h:0}, PATH_B = {x:0,z:0,h:0}, PATH_C = {x:0,z:0,h:0};
+
+/* THE FRAME, refreshed once a frame, and `place()` — the single funnel every
+   draw site now goes through. Give it a beat and a lateral offset and it hands
+   back where that lands on screen, plus the yaw a box needs to stay square to
+   the road THERE rather than to the road you are on.
+
+   It returns a shared record. Every caller uses it immediately and none of
+   them keep it: this runs a few thousand times a frame and allocating there
+   is a garbage collector running inside a rhythm game. */
+const FRAME = { o:PATH_A, ch:1, sh:0 };
+const VPT = { x:0, z:0, yaw:0 };
+function setFrame(b){
+  pathInto(b, FRAME.o);
+  FRAME.ch = Math.cos(FRAME.o.h); FRAME.sh = Math.sin(FRAME.o.h);
+}
+function place(b, lat){
+  worldInto(b, lat, PATH_B);
+  viewInto(PATH_B.x, PATH_B.z, FRAME.o, FRAME.ch, FRAME.sh, VPT);
+  VPT.yaw = PATH_B.h - FRAME.o.h;
+  return VPT;
+}
 
 /* World position `lat` units to the right of the centreline at beat b. The
    existing lateral weave rides along too, so Atlantica's forks still work
@@ -3321,6 +3357,10 @@ function frame(now){
   // lane visual: eased toward target, with slip overshoot bleeding off
   Game.laneVis += (Game.lane - Game.laneVis) * Math.min(1, dt*13);
   Game.slide *= Math.max(0, 1 - dt*4.5);
+  /* THE FRAME FOR THIS FRAME. Everything drawn below is expressed relative to
+     where the player is on the path and which way they are pointing, so this
+     has to be set before the first place() call and cannot move afterwards. */
+  setFrame(beat);
   const cx0 = centerX(beat);
   /* In the melody layer the lane is expressed as ALTITUDE, so the lateral
      offset has to collapse — exactly as the chart objects already do with
@@ -3387,7 +3427,22 @@ function frame(now){
   const py = groundY + (flyY - groundY) * Game.sideMix;
   // The look-at target reads 2.4 beats ahead of the player, so on a branch the
   // camera yaws into the turn by itself — no explicit heading to keep in sync.
-  const aheadX = centerX(beat + 2.4);
+  /* THE LOOK-AT READS AHEAD ALONG THE ROAD, and now that the road can turn,
+     "ahead" is a point on the path rather than an x offset. Placing it 2.6
+     beats up the path means the camera yaws into a corner by itself, exactly
+     as it already banked into a branch — there is still no explicit heading
+     anywhere in the camera code, which is why it cannot fall out of sync. */
+  /* LOOK-AHEAD SHORTENS INTO A BEND. At a flat 2.6 beats the target sits 52
+     units up the road, which on a straight is exactly the lead a rhythm game
+     wants and inside a quarter-turn is most of the way round the corner — so
+     the camera swung to the new street while the rider was still on the old
+     one, and the road you were actually driving slid off to the far side of
+     the frame. Measuring the turn rate and pulling the target in restores it:
+     the camera follows the corner instead of arriving before it. */
+  pathInto(beat + 1, PATH_C);
+  const curve = Math.min(1, Math.abs(PATH_C.h - FRAME.o.h) / (Math.PI/2/TURN_B));
+  const AHEAD = place(beat + 2.6 - 1.6*curve, 0);
+  const aheadX = AHEAD.x;
   // Pulled back for the racer build: you need to read rivals and spheres, not
   // just the next lane. Costs some detail up close; worth it.
   // While overboard the camera stays with the TRACK, not with you — chasing you
@@ -3395,7 +3450,7 @@ function frame(now){
   const camLane = Math.max(0, Math.min(LANES-1, Game.laneVis));
   const camY = Game.down() ? DECK_Y + 0.95 : py;
   const chaseEye=[cx0 + laneX(camLane)*0.45, camY+8.4+bob, PLAYER_Z+29];
-  const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, PLAYER_Z-52];
+  const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, AHEAD.z];
 
   /* SIDE VIEW. Looking along -X, so world -Z becomes screen-right: the track
      runs off to the right and notes arrive from there, while altitude reads
@@ -3495,33 +3550,47 @@ function frame(now){
   // causeway: only where the chart says a causeway exists
   // The deck now exists for EVERY section — open water means exposed structure
   // over big sea, not riding the sea. The track is always above water.
-  for(let z=26; z>-350; z-=6){          // starts behind the camera, not in front of it
-    const b = beat + (-z + PLAYER_Z)/UPB;
+  /* THE DECK now walks BEATS rather than screen depth. It used to step z from
+     +26 to -350 and solve back for the beat, which is the same thing only as
+     long as the road is straight — the moment it turns, a fixed z is no longer
+     a fixed distance along the road, and slices bunch up on the inside of the
+     corner and tear apart on the outside. Stepping the beat and asking place()
+     where that lands is correct at any heading, and on a straight track it
+     produces the identical numbers it always did. 0.3 beats is the same 6
+     units the old step was. */
+  for(let b = beat - 2.05; b < beat + 16.75; b += 0.3){
     if(b < 0) continue;
     const ent = routeAt(b);
-    const cxz = centerX(b);
     const open = ent.kind === 'open';
     const shade = open ? 0.78 : 1.0;
     // Road width is per-slice, so a side street visibly narrows as it arrives.
     const hwz = deckHalfW(b);
     const spz = laneSpanAt(b);
-    pushInst(MESH_BOX, cxz, DECK_Y-0.2, z, hwz+0.9, 0.22, 2.9,
-             DECK[0]*shade, DECK[1]*shade, DECK[2]*shade, 0,0, 0);
+    let P = place(b, 0);
+    const yw = P.yaw;
+    pushInst(MESH_BOX, P.x, DECK_Y-0.2, P.z, hwz+0.9, 0.22, 2.9,
+             DECK[0]*shade, DECK[1]*shade, DECK[2]*shade, 0,0, 0, yw);
     // Lane dividers only between lanes that exist here.
     for(let l=spz.lo+1;l<=spz.hi;l++){
-      const x = cxz + (l-2)*LANE_W - LANE_W/2;
-      pushInst(MESH_BOX, x, DECK_Y+0.03, z, 0.055, 0.03, 1.5,
-               DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12);
+      P = place(b, (l-2)*LANE_W - LANE_W/2);
+      pushInst(MESH_BOX, P.x, DECK_Y+0.03, P.z, 0.055, 0.03, 1.5,
+               DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yw);
     }
     if(!open){                                          // causeway carries side rails
-      for(const sx of [-1,1])
-        pushInst(MESH_BOX, cxz + sx*(hwz+0.75), DECK_Y+0.5, z, 0.10, 0.42, 1.4,
-                 DECK[0]*1.6, DECK[1]*1.5, DECK[2]*1.5, 0,0, 0.05);
+      for(const sx of [-1,1]){
+        P = place(b, sx*(hwz+0.75));
+        pushInst(MESH_BOX, P.x, DECK_Y+0.5, P.z, 0.10, 0.42, 1.4,
+                 DECK[0]*1.6, DECK[1]*1.5, DECK[2]*1.5, 0,0, 0.05, yw);
+      }
     }
-    if(Math.round(-z) % 24 < 6){                        // legs down into the water
-      for(const sx of [-1,1])
-        pushInst(MESH_BOX, cxz + sx*(hwz+0.5), DECK_Y-3.4, z, 0.30, 3.3, 0.30,
-                 DECK[0]*0.65, DECK[1]*0.65, DECK[2]*0.65, 0,0, 0);
+    // Legs every 24 units ALONG THE ROAD — measured in world distance now, so
+    // they stay evenly spaced through a corner instead of pooling in it.
+    if(Math.round(b*UPB) % 24 < 6){
+      for(const sx of [-1,1]){
+        P = place(b, sx*(hwz+0.5));
+        pushInst(MESH_BOX, P.x, DECK_Y-3.4, P.z, 0.30, 3.3, 0.30,
+                 DECK[0]*0.65, DECK[1]*0.65, DECK[2]*0.65, 0,0, 0, yw);
+      }
     }
   }
 
@@ -3554,12 +3623,23 @@ function frame(now){
     const k0 = Math.floor((dNow - 44)/LOT), k1 = Math.ceil((dNow + 336)/LOT);
     for(let k = k0; k <= k1; k++){
       const d  = k*LOT;
-      const zz = PLAYER_Z - (d - dNow);
-      if(zz > 30 || zz < -352) continue;
+      if(d - dNow > 336 || d - dNow < -44) continue;
       const bb = d/UPB;
       if(bb < 0) continue;
-      const cxb = centerX(bb), hwb = deckHalfW(bb);
-      const far = Math.max(0, 1 - (-zz)/340);            // 1 near, 0 out at the fog
+      const hwb = deckHalfW(bb);
+      const far = Math.max(0, 1 - (d - dNow)/340);       // 1 near, 0 out at the fog
+      /* INTERSECTIONS ARE HOLES IN THE BLOCK. A corner has no building on it —
+         it has a crossing street — and this is not decoration, it is the
+         difference between a turn you can see through and a turn into a wall.
+         The first corner rendered pitch black: the camera leads into the bend
+         before the eye has reached it, so the sight line ran straight through
+         whatever stood on the corner, and what stood there was a tenement.
+         Clearing a block's width either side of every boundary opens the
+         crossing, and the buildings beyond it become the far side of the
+         junction — which is also what tells you an intersection is coming. */
+      let toCorner = 1e9;
+      for(const r of ROUTE) toCorner = Math.min(toCorner, Math.abs(bb - r.startBeat));
+      const open4 = toCorner < 1.9;
       for(const sx of [-1,1]){
         const side = sx < 0 ? 0 : 1;
         // Set back from the kerb, and never so tall near the camera that it
@@ -3580,10 +3660,15 @@ function frame(now){
            where the depth buffer hides them completely, and does it on the same
            smooth sideMix the camera turn already rides — the city sinks away as
            you lift off it. The far row stays: from up there it is the backdrop. */
+        if(open4) continue;                       // the corner is the crossing
         const sink = sx > 0 ? Game.sideMix*(bh + 12) : 0;
-        pushInst(MESH_BOX, cxb + sx*(off + bw*0.5), DECK_Y - 2 + bh*0.5 - sink, zz,
+        // Square to ITS street, not to yours — which is the whole point of the
+        // yaw channel, and the difference between a city block and a billboard.
+        let P = place(bb, sx*(off + bw*0.5));
+        const byaw = P.yaw;
+        pushInst(MESH_BOX, P.x, DECK_Y - 2 + bh*0.5 - sink, P.z,
                  bw, bh, 8.5,
-                 0.055 + warm*0.55, 0.048 + warm*0.34, 0.070 + warm*0.30, 0,0, 0);
+                 0.055 + warm*0.55, 0.048 + warm*0.34, 0.070 + warm*0.30, 0,0, 0, byaw);
         // WINDOWS. Three per face, lit or dark on the same hash, so a block
         // reads as somebody being up at one in the morning rather than as a
         // texture. Only on the face turned toward the road.
@@ -3591,32 +3676,40 @@ function frame(now){
           if(hash(k, side*8 + w + 11) < 0.42) continue;
           const wy = DECK_Y + 2.5 + w*(bh/3.4) + hash(k, w+21)*1.2;
           if(wy > DECK_Y - 2 + bh - 1.5) continue;
-          pushInst(MESH_BOX, cxb + sx*(off - 0.05), wy - sink, zz + (hash(k,w+31)-0.5)*5.0,
-                   0.12, 0.75, 1.05, 1.0, 0.80, 0.42, 0,0, 0.55 + 0.35*far);
+          // Jittered ALONG the street in beats, so the jitter turns the corner
+          // with the building it belongs to.
+          P = place(bb + (hash(k,w+31)-0.5)*0.25, sx*(off - 0.05));
+          pushInst(MESH_BOX, P.x, wy - sink, P.z,
+                   0.12, 0.75, 1.05, 1.0, 0.80, 0.42, 0,0, 0.55 + 0.35*far, byaw);
         }
       }
       /* STREETLIGHTS. Every other lot, both sides, and the reason the track
          reads at all: the pool of light on the road is what gives the asphalt
          a surface, and the lamp heads marching away are what give the street
          its perspective. */
-      if(k % 2 === 0){
+      if(k % 2 === 0 && !open4){
         for(const sx of [-1,1]){
           const off = hwb + 1.9;
           // Same reason as the buildings: the near row is between the melody
           // camera and the staff. The lamps go down with their street.
           const lsink = sx > 0 ? Game.sideMix*19 : 0;
-          pushInst(MESH_BOX, cxb + sx*off, DECK_Y + 3.4 - lsink, zz, 0.16, 7.0, 0.16,
-                   0.10,0.09,0.11, 0,0, 0);
-          pushInst(MESH_BOX, cxb + sx*(off - 0.85), DECK_Y + 6.9 - lsink, zz,
-                   0.95, 0.12, 0.16, 0.12,0.11,0.12, 0,0, 0);
-          pushInst(MESH_SPH, cxb + sx*(off - 1.5), DECK_Y + 6.6 - lsink, zz,
+          let P = place(bb, sx*off);
+          const lyaw = P.yaw;
+          pushInst(MESH_BOX, P.x, DECK_Y + 3.4 - lsink, P.z, 0.16, 7.0, 0.16,
+                   0.10,0.09,0.11, 0,0, 0, lyaw);
+          P = place(bb, sx*(off - 0.85));
+          pushInst(MESH_BOX, P.x, DECK_Y + 6.9 - lsink, P.z,
+                   0.95, 0.12, 0.16, 0.12,0.11,0.12, 0,0, 0, lyaw);
+          P = place(bb, sx*(off - 1.5));
+          pushInst(MESH_SPH, P.x, DECK_Y + 6.6 - lsink, P.z,
                    0.40, 0.26, 0.40, 1.0,0.66,0.28, 0,0, 1.0);
           /* The pool it throws. Dark base colour carrying most of its light in
              GLOW rather than in albedo — at full brightness these read as
              glowing slabs lying on the road instead of light falling on it,
              and the road stops being a surface. */
-          pushInst(MESH_BOX, cxb + sx*(off - 2.4), DECK_Y + 0.02, zz,
-                   1.7, 0.01, 2.6, 0.52,0.29,0.11, 0,0, 0.30 + 0.16*far);
+          P = place(bb, sx*(off - 2.4));
+          pushInst(MESH_BOX, P.x, DECK_Y + 0.02, P.z,
+                   1.7, 0.01, 2.6, 0.52,0.29,0.11, 0,0, 0.30 + 0.16*far, lyaw);
         }
       }
     }
@@ -3638,19 +3731,19 @@ function frame(now){
     for(let l=0;l<5;l++){
       const on = (l === cur);
       const c = on ? [0.55,0.96,0.95] : [0.28,0.46,0.58];
-      for(let z=22; z>-300; z-=14){
-        const bb = beat + (-z + PLAYER_Z)/UPB;
+      for(let bb = beat - 1.85; bb < beat + 14.25; bb += 0.7){
         if(bb < 0) continue;
-        pushInst(MESH_BOX, centerX(bb), altY(l), z, 0.05, 0.05, 5.4,
-                 c[0],c[1],c[2], 0,0, (on ? 0.9 : 0.28)*sm);
+        const P = place(bb, 0);
+        pushInst(MESH_BOX, P.x, altY(l), P.z, 0.05, 0.05, 5.4,
+                 c[0],c[1],c[2], 0,0, (on ? 0.9 : 0.28)*sm, P.yaw);
       }
     }
     for(let bb = Math.ceil(beat/4)*4; bb < beat + 18; bb += 4){
-      const z = PLAYER_Z - (bb-beat)*UPB;
-      if(z < -300 || z > 24) continue;
+      if((bb-beat)*UPB > 315) continue;
       const near2 = Math.max(0, 1 - (bb-beat)*0.5);
-      pushInst(MESH_BOX, centerX(bb), DECK_Y + 10, z, 0.09, 10, 0.09,
-               0.42,0.95,0.92, 0,0, (0.25 + 0.5*near2)*sm);
+      const P = place(bb, 0);
+      pushInst(MESH_BOX, P.x, DECK_Y + 10, P.z, 0.09, 10, 0.09,
+               0.42,0.95,0.92, 0,0, (0.25 + 0.5*near2)*sm, P.yaw);
     }
   }
 
@@ -3673,22 +3766,30 @@ function frame(now){
       const g   = armed ? 1.0 : (live ? 0.5 : 0.22);
       const col = isMel ? (armed ? [0.42,0.95,0.90] : [0.24,0.55,0.60])
                         : (armed ? [0.98,0.38,0.68] : [0.58,0.28,0.60]);
+      /* On a CORRIDOR track the rail follows branchX() — the exact lateral
+         curve the centreline will take, so the guide is literally the path. On
+         a GRID track there is no lateral curve to follow: the fork is a corner,
+         and the rail's job is only to mark which side of the intersection you
+         may leave from. So the branch offset collapses to zero there and the
+         rails run straight along the kerb. */
       for(let i=0;i<=16;i++){
         const t  = i/16;
         const bb = e.beat + t*JUNC_LEAD;
-        const zz = PLAYER_Z - (bb - beat)*UPB;
-        if(zz > 24 || zz < -350) continue;
-        const hx = branchX(ent, bb, sx);
-        pushInst(MESH_BOX, hx + sx*(HALFW+0.8), DECK_Y+0.45, zz,
-                 0.26, 0.50 + (armed?0.40:0), 2.4, col[0],col[1],col[2], 0,0, g*(1-t*0.35));
+        if((bb - beat)*UPB > 340 || (bb - beat)*UPB < -40) continue;
+        const bend = TRACK.grid ? 0 : branchX(ent, bb, sx) - ent.cx;
+        const P = place(bb, bend + sx*(HALFW+0.8));
+        pushInst(MESH_BOX, P.x, DECK_Y+0.45, P.z,
+                 0.26, 0.50 + (armed?0.40:0), 2.4, col[0],col[1],col[2], 0,0,
+                 g*(1-t*0.35), P.yaw);
       }
       // gate post at the mouth of the fork
-      const zz0 = PLAYER_Z - (e.beat - beat)*UPB;
-      if(zz0 < 24 && zz0 > -350){
-        pushInst(MESH_BOX, ent.cx + sx*(HALFW+0.8), DECK_Y+2.1, zz0,
-                 0.22, 2.1, 0.22, col[0],col[1],col[2], 0,0, g);
-        pushInst(MESH_BOX, ent.cx + sx*(HALFW+0.8), DECK_Y+4.2, zz0,
-                 0.95, 0.16, 0.22, col[0],col[1],col[2], 0,0, g);
+      if((e.beat - beat)*UPB < 340 && (e.beat - beat)*UPB > -40){
+        let P = place(e.beat, sx*(HALFW+0.8));
+        const py0 = P.yaw, px0 = P.x, pz0 = P.z;
+        pushInst(MESH_BOX, px0, DECK_Y+2.1, pz0,
+                 0.22, 2.1, 0.22, col[0],col[1],col[2], 0,0, g, py0);
+        pushInst(MESH_BOX, px0, DECK_Y+4.2, pz0,
+                 0.95, 0.16, 0.22, col[0],col[1],col[2], 0,0, g, py0);
       }
     }
   }
@@ -3698,18 +3799,18 @@ function frame(now){
     if(e.done || e.t === 'junction') continue;
     const dz = (e.beat - beat)*UPB;
     if(dz < -6 || dz > 340) continue;
-    const z = PLAYER_Z - dz;
     /* A note's `lane` is an instrument in chase view and a PITCH in the melody
        layer, so its position blends with the camera: events slide off the deck
        and rise into the staff as the view turns. Driven by sideMix (the view),
        not by the section kind — otherwise toggling the layer mid-section would
        leave the notes laid out for the wrong axis. */
     const mm = Game.sideMix;
-    const ex = centerX(e.beat) + laneX(e.lane)*(1-mm);
+    const EP = place(e.beat, laneX(e.lane)*(1-mm));
+    const ex = EP.x, z = EP.z, eyaw = EP.yaw;
     const baseY = DECK_Y + ((altY(e.lane) - 0.7) - DECK_Y)*mm;
     if(e.t === 'haz'){
-      pushInst(MESH_BOX, ex, baseY+0.75, z, 1.15,0.75,0.55, 0.05,0.06,0.09, 0,0, 0);
-      pushInst(MESH_BOX, ex, baseY+1.45, z, 1.15,0.06,0.5, 0.91,0.35,0.16, 0,0, 0.85);
+      pushInst(MESH_BOX, ex, baseY+0.75, z, 1.15,0.75,0.55, 0.05,0.06,0.09, 0,0, 0, eyaw);
+      pushInst(MESH_BOX, ex, baseY+1.45, z, 1.15,0.06,0.5, 0.91,0.35,0.16, 0,0, 0.85, eyaw);
     } else if(e.t === 'flow'){
       /* An orb wears the colour of the fret it will sound AND the size of its
          accent. Reading the phrase before you play it is the whole skill, and
@@ -3738,35 +3839,39 @@ function frame(now){
          lane-widths to the left of the road, hanging off the deck. Like the
          gate, it sits on the road centre and, in the melody view, at the middle
          of the staff. */
-      const hx  = centerX(e.beat);
+      const HP  = place(e.beat, 0);
+      const hx  = HP.x, hz = HP.z, hyaw = HP.yaw;
       const hy  = DECK_Y + ((altY(2) - 0.7) - DECK_Y)*mm;
       const hhw = deckHalfW(e.beat);
       const nearh = Math.max(0, 1 - Math.abs(dz)/150);
-      pushInst(MESH_BOX, hx, hy+0.52, z, hhw+0.6, 0.34, 0.42,
-               0.10,0.07,0.07, 0,0, 0);
-      pushInst(MESH_BOX, hx, hy+0.88, z, hhw+0.6, 0.07, 0.30,
-               0.95,0.42,0.16, 0,0, 0.55 + 0.45*nearh);
+      pushInst(MESH_BOX, hx, hy+0.52, hz, hhw+0.6, 0.34, 0.42,
+               0.10,0.07,0.07, 0,0, 0, hyaw);
+      pushInst(MESH_BOX, hx, hy+0.88, hz, hhw+0.6, 0.07, 0.30,
+               0.95,0.42,0.16, 0,0, 0.55 + 0.45*nearh, hyaw);
       for(let k=-2;k<=2;k++)                      // hazard stripes
-        pushInst(MESH_BOX, hx + k*(hhw*0.42), hy+0.52, z+0.05, 0.22, 0.30, 0.10,
-                 0.96,0.72,0.20, 0,0, 0.30 + 0.30*nearh);
+        pushInst(MESH_BOX, place(e.beat, k*(hhw*0.42)).x, hy+0.52, hz+0.05, 0.22, 0.30, 0.10,
+                 0.96,0.72,0.20, 0,0, 0.30 + 0.30*nearh, hyaw);
     } else if(e.t === 'jump'){
       /* A gate hits you in EVERY lane, so it must be unmissable. It used to be
          two thin posts at the outer edges — nothing in your lane, nothing across
          the track — which is precisely why it read as "hit for no reason".
          It is now a full-width barrier that brightens as it approaches. */
-      const gx = centerX(e.beat);
+      const GP = place(e.beat, 0);
+      const gx = GP.x, gz = GP.z, gyaw = GP.yaw;
       const near = Math.max(0, 1 - Math.abs(dz)/140);
       /* Fairness rule 1: a hitbox may never be wider than its art. A gate hits
          across every lane, so it must be drawn exactly as wide as the road is
          HERE — on a three-lane street that is narrower. */
       const ghw = deckHalfW(e.beat);
-      pushInst(MESH_BOX, gx, baseY+1.70, z, ghw+0.8, 0.45, 0.34,
-               0.31,0.83,0.89, 0,0, 0.55 + 0.40*near);
-      pushInst(MESH_BOX, gx, baseY+0.62, z, ghw+0.8, 0.05, 0.28,
-               0.31,0.83,0.89, 0,0, 0.28 + 0.35*near);
-      for(const sx of [-1,1])
-        pushInst(MESH_BOX, gx + sx*(ghw+0.7), baseY+1.05, z, 0.24,1.05,0.32,
-                 0.31,0.83,0.89, 0,0, 0.75);
+      pushInst(MESH_BOX, gx, baseY+1.70, gz, ghw+0.8, 0.45, 0.34,
+               0.31,0.83,0.89, 0,0, 0.55 + 0.40*near, gyaw);
+      pushInst(MESH_BOX, gx, baseY+0.62, gz, ghw+0.8, 0.05, 0.28,
+               0.31,0.83,0.89, 0,0, 0.28 + 0.35*near, gyaw);
+      for(const sx of [-1,1]){
+        const GQ = place(e.beat, sx*(ghw+0.7));
+        pushInst(MESH_BOX, GQ.x, baseY+1.05, GQ.z, 0.24,1.05,0.32,
+                 0.31,0.83,0.89, 0,0, 0.75, gyaw);
+      }
     }
   }
 
@@ -3839,6 +3944,7 @@ function frame(now){
   gl.uniformMatrix4fv(P_obj.u.uVP,false,VP);
   gl.uniform3fv(P_obj.u.uSunDir,sunDir);
   gl.uniform3fv(P_obj.u.uHorizonCol,horizon);
+  gl.uniform3fv(P_obj.u.uCam,eye);          // fog measures from here now
   gl.uniform1f(P_obj.u.uBands,4);
   drawMesh(MESH_BOX); drawMesh(MESH_SPH); drawMesh(MESH_HULL); drawMesh(MESH_TOR);
 
