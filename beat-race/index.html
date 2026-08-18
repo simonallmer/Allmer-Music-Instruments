@@ -5569,52 +5569,15 @@ function frame(now){
   drawSaige(px, py, PLAYER_Z, lean + downRoll, pitch,
             RIDER.ringA, RIDER.ringB, Game.down() ? 0.35 : 1);
 
-  /* ── LIFT ─────────────────────────────────────────────────────────
-     In the melody layer the Saige is genuinely FLYING — the deck is twenty
-     units below it and the altitude is the note being played — and nothing on
-     the vehicle said so. It read as the same machine on the same road with the
-     camera moved, which quietly undercut the one idea the layer is built on.
+  /* NO THRUST EFFECT UNDER THE HULL. Two tapering plumes of light were tried
+     here — the melody layer really is flight, and nothing on the vehicle said
+     so. Cut on sight: the instanced pass has no blending, so "light" can only
+     be opaque glowing geometry, and a pair of solid orange cones under a small
+     dark wedge does not read as thrust. It reads as a cartoon rocket.
 
-     So it puts its weight on something. Two jets under the hull, thrown DOWN
-     and fading over about two units, in the ring colours the vehicle already
-     carries: warm forward, cool aft, so the thrust belongs to the Saige rather
-     than being generic exhaust. Their length breathes on the beat and jitters a
-     little per frame, because a hovering thing is never quite still — a jet at
-     constant length looks like a bar bolted to the underside.
-
-     All of it scales with sideMix, so it grows out of the machine as the view
-     turns and is completely absent in chase view, where the wheels are down.
-
-     Drawn AFTER the hull. The instanced pass has no blending, so the jets are
-     opaque geometry: they must be small, under the silhouette, and never in
-     front of the thing you are steering. */
-  if(Game.sideMix > 0.02){
-    const lift = Game.sideMix;
-    // Thrust breathes on the beat: a hovering thing is never quite still, and
-    // a jet at constant length looks like a bar bolted to the underside.
-    const puff = 0.78 + 0.22*Math.sin(beat*Math.PI*2) + pulse*0.30;
-    /* TWO PLUMES, not a ring. A torus was tried here first and cut for the
-       same reason the accent halo was: it is a big opaque hoop of geometry
-       hanging under the machine, and it read as a prop the Saige was sitting
-       in rather than as air being pushed. Thrust is a TAPER — bright and tight
-       at the nozzle, wide and faint at the bottom — and five stacked spheres
-       per side say that in ten instances.
-
-       Warm forward and cool aft, the same Day/Night poles the hull's rings
-       carry, so the lift belongs to this vehicle rather than being exhaust. */
-    for(const [dz, col] of [[-1.15, RIDER.ringA], [1.05, RIDER.ringB]]){
-      for(let k=0;k<5;k++){
-        const u = k/4;                                    // 0 at the nozzle, 1 at the tip
-        const drop = (0.35 + u*3.1) * puff * lift;
-        const r    = (0.20 + u*0.30) * lift;              // widens as it falls
-        const len  = (0.34 + u*0.34) * puff * lift;
-        const jit  = (Math.random()-0.5)*0.10*u;          // the tail wanders
-        pushInst(MESH_SPH, px + jit, py + 0.34 - drop, PLAYER_Z + dz + jit*0.6,
-                 r, len, r, col[0], col[1], col[2], 0, 0,
-                 (1.35 - u*1.15)*lift);                   // burns out downward
-      }
-    }
-  }
+     If the layer needs to say "flying" it has to come from something other
+     than emissive blobs bolted to the underside — the altitude, the staff and
+     the sunken city are already saying it, and they say it quietly. */
 
   // wind shadow — the Flow trail behind the Saige
   // A wind shadow is calmed water, so it wants to be a WIDE soft ribbon. Scaling
