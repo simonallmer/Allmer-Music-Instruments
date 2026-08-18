@@ -7,6 +7,7 @@
          --day:#f5a93c; --night:#4fd4e4; }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:#060d14;overflow:hidden;touch-action:none;
+    overscroll-behavior:none;
     font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);
     user-select:none;-webkit-user-select:none}
   /* touch-action does NOT inherit, so the copy on <body> was never governing
@@ -120,6 +121,30 @@
     #gate .keys{display:none}
   }
 
+  /* ── THE ARROW PADS ──────────────────────────────────────────────────
+     Only shown when they are switched on (phones, by default). Bottom
+     corners, because that is where thumbs already are when a phone is held
+     in landscape, and because the middle of the screen is the game. Left
+     thumb steers, right thumb takes the vertical — one hand per axis rather
+     than one hand doing everything. */
+  #pads{display:none}
+  #pads.on{display:block}
+  #pads .pad{position:fixed;bottom:12px;z-index:11;display:flex;gap:10px}
+  #pads .lr{left:56px}                       /* clear of the pause button */
+  #pads .ud{right:14px;flex-direction:column}
+  .pk{width:52px;height:52px;padding:0;display:grid;place-content:center;
+    border:1px solid var(--line);border-radius:13px;
+    background:rgba(6,13,20,.62);backdrop-filter:blur(10px);color:var(--ink);
+    font:19px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer;
+    transition:background .09s ease,border-color .09s ease}
+  .pk.hit{background:rgba(79,212,228,.24);border-color:rgba(79,212,228,.65);color:#fff}
+  /* Down does nothing in chase view — there is nothing below the deck. Dimmed
+     rather than removed, so the pad does not change shape twice a song. */
+  #pads:not(.side) .pk[data-dir=down]{opacity:.26}
+  /* The status line lives along the bottom; the pads now own that strip. */
+  body.pads #sect{bottom:74px}
+
   /* The ?touchdebug readout. Off unless the URL asks for it. */
   #tdbg{position:fixed;left:8px;top:8px;z-index:30;display:none;white-space:pre;
     padding:8px 10px;border-radius:8px;border:1px solid var(--line);
@@ -172,6 +197,16 @@
 <div id="auto"><i></i>Autoride &nbsp;·&nbsp; arrow key to take over</div>
 <div id="judge"></div>
 <div id="tdbg"></div>
+<div id="pads">
+  <div class="pad lr">
+    <button class="pk" data-dir="left"  aria-label="Move left">&#8592;</button>
+    <button class="pk" data-dir="right" aria-label="Move right">&#8594;</button>
+  </div>
+  <div class="pad ud">
+    <button class="pk" data-dir="up"   aria-label="Jump, or up the staff">&#8593;</button>
+    <button class="pk" data-dir="down" aria-label="Down the staff">&#8595;</button>
+  </div>
+</div>
 <div id="sect"></div>
 <div id="pausebtn" title="Pause (Esc)">❙❙</div>
 
@@ -184,6 +219,7 @@
       <input id="vol" type="range" min="0" max="100" step="1" value="80">
       <span id="vol_v">80</span>
     </div>
+    <div class="k" id="padbtn">On-screen arrows: On</div>
     <div class="k" id="autobtn">Autoride</div>
     <div class="k">Resume</div>
     <div class="hint">Esc or P &nbsp;·&nbsp; M to mute &nbsp;·&nbsp; R autoride</div>
@@ -2253,7 +2289,7 @@ let sawTouch = false;                   // touch events exist here → ignore po
 let lastTap=0, lastTapX=0, lastTapY=0;
 // A touch that lands on a control (pause, its overlay, the start gate) belongs
 // to that control, not to the game.
-const onUI = t => !!(t && t.closest && t.closest('#pausebtn,#pause,#gate,#auto'));
+const onUI = t => !!(t && t.closest && t.closest('#pausebtn,#pause,#gate,#auto,#pads'));
 // A swipe should cost the same SHARE of the screen everywhere, not the same
 // number of pixels. Clamped so it never gets silly on either extreme.
 const swipeMin = () =>
@@ -2396,6 +2432,85 @@ if(window.PointerEvent){
     gEnd(e.clientX, e.clientY, false);
   });
 }
+/* ── THE ARROW PADS ──────────────────────────────────────────────────────
+   Four buttons, and the honest reason they exist: iOS SAFARI will not give
+   this page a horizontal drag. The same build swipes perfectly in Chrome on
+   the same iPhone — Chrome on iOS is a WKWebView, which has no back/forward
+   swipe gesture, and Safari's owns every sideways drag before the page sees
+   it. touch-action, preventDefault on a non-passive start, overscroll-
+   behavior: all of it is in place above, and Safari still keeps the gesture.
+   That is not a bug I can fix from inside the page, so the phone gets buttons.
+
+   They press through swipe(), the same function a gesture calls, fed a
+   synthetic delta that clears the gate. There is exactly one implementation
+   of what a direction MEANS, so the buttons cannot drift away from the
+   swipes — left is a lane in chase view and a step down the staff in side
+   view because that is what a leftward swipe is, not because it was written
+   out twice.
+
+   ON FOR PHONES, OFF FOR TABLETS, and switchable either way from the pause
+   panel, where the choice sticks. A tablet has the screen for a swipe and
+   does not need its corners spent on buttons; a phone that swipes fine
+   (Chrome) can switch them off and lose nothing. */
+const PHONE = matchMedia('(hover:none) and (pointer:coarse)').matches &&
+              Math.min(screen.width, screen.height) <= 500;
+const padsEl = document.getElementById('pads');
+const padBtnEl = document.getElementById('padbtn');
+// Private browsing can make localStorage throw on both read and write, and a
+// dead storage must not take the controls down with it.
+const padsRead = () => { try{ return localStorage.getItem('beatrace.pads'); }catch(e){ return null; } };
+let padsOn = (padsRead() || (PHONE ? 'on' : 'off')) === 'on';
+
+function padsApply(){
+  padsEl.classList.toggle('on', padsOn);
+  document.body.classList.toggle('pads', padsOn);
+  padBtnEl.textContent = 'On-screen arrows: ' + (padsOn ? 'On' : 'Off');
+  const row = (k, t) => '<div class="r"><b>' + k + '</b>' + t + '</div>';
+  document.getElementById('thint').innerHTML = padsOn
+    ? row('&#8596;', 'arrows or swipe to move')
+    + row('&#8593;', 'up to jump')
+    + row('&#8597;', 'side view: up / down the staff')
+    + row('&#8226;&#8226;', 'double tap to switch view')
+    : row('&#8596;', 'swipe to change lane')
+    + row('&#8593;', 'swipe up to jump')
+    + row('&#8597;', 'side view: up / down the staff')
+    + row('&#8226;&#8226;', 'double tap to switch view');
+}
+padsApply();
+padBtnEl.addEventListener('click', e=>{
+  e.stopPropagation();                        // the panel behind it means RESUME
+  padsOn = !padsOn;
+  try{ localStorage.setItem('beatrace.pads', padsOn ? 'on' : 'off'); }catch(err){}
+  padsApply();
+});
+
+const PAD_DIR = {left:[-1,0], right:[1,0], up:[0,-1], down:[0,1]};
+let padLast = 0;
+function padHit(dir, el){
+  /* One press fires pointerdown AND touchstart. 80ms of debounce collapses
+     them into the one press they were, and is still far under the ~120ms
+     between 16ths at this tempo, so it can never eat a real second press. */
+  const now = performance.now();
+  if(now - padLast < 80) return;
+  padLast = now;
+  if(!Clock.started || Clock.paused) return;
+  const d = PAD_DIR[dir]; if(!d) return;
+  const g = swipeGate();
+  swipe(d[0] * g.x * 2, d[1] * g.y * 2);      // a gesture, minus the finger
+  hideTouchHint();
+  el.classList.add('hit');
+  setTimeout(()=> el.classList.remove('hit'), 110);
+}
+padsEl.querySelectorAll('.pk').forEach(el=>{
+  const dir = el.dataset.dir;
+  /* On press, not on release: a rhythm game that waits for your finger to
+     come back up has already missed the note. stopPropagation keeps the
+     press out of the gesture machine — a button is not a swipe and not a
+     tap, and a tap here would otherwise count toward the view-switch. */
+  const fire = e => { e.preventDefault(); e.stopPropagation(); padHit(dir, el); };
+  el.addEventListener('touchstart', fire, {passive:false});
+  el.addEventListener('pointerdown', fire);
+});
 /* ── ?touchdebug ─────────────────────────────────────────────────────────
    Load the page with ?touchdebug on the end of the URL and the raw input
    stream is printed on screen. Debugging a phone through a person is a slow
@@ -2408,7 +2523,7 @@ if(window.PointerEvent){
    BUILD is the giveaway for the other half of the problem: a phone happily
    showing a cached copy of the file, in which case none of this is running
    and the stamp will say so. */
-const BUILD = '2026-08-18 · input 3';
+const BUILD = '2026-08-18 · input 4 · pads';
 const TDBG  = /touchdebug/i.test(location.search + location.hash);
 const tdbgEl = document.getElementById('tdbg');
 const tdbgN = {start:0, move:0, end:0, cancel:0};
@@ -3098,14 +3213,18 @@ function frame(now){
   }
   multEl.classList.toggle('on', Game.mult > 1 && !Clock.paused);
   autoEl.classList.toggle('on', Game.auto && !Clock.paused);
+  // Lights the DOWN arrow only where down means something.
+  padsEl.classList.toggle('side', Game.inMelody);
   flowNEl.textContent = Game.flowChain;
   flowEl.classList.toggle('on', Game.flowChain > 1);
   sectEl.textContent = Clock.started
-    ? (bj ? (TOUCH ? '◄ SWIPE OUT AT AN EDGE TO FORK ►'
+    ? (bj ? (padsOn ? '◄ PRESS OUT AT AN EDGE TO FORK ►'
+                    : TOUCH ? '◄ SWIPE OUT AT AN EDGE TO FORK ►'
                    : '◄ lane 0 + LEFT = melody          ·          lane 4 + RIGHT = arrangement ►')
           : TRACK_NAME + '  ·  ' + sec.name
             + (Game.inMelody
-                 ? (TOUCH ? '  ·  swipe ↑ ↓ = pitch  ·  double tap = arrangement'
+                 ? (padsOn ? '  ·  ↑ ↓ = pitch  ·  double tap = arrangement'
+                          : TOUCH ? '  ·  swipe ↑ ↓ = pitch  ·  double tap = arrangement'
                           : '  ·  ↑↓ = pitch  ·  again at the ends = octave')
                  : (Game.mult > 1 ? '  ·  ×' + Game.mult : '')))
     : '';
