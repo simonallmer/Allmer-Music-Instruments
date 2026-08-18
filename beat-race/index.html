@@ -1346,7 +1346,7 @@ function laneSpanAt(b){
    The camera is what smooths it — see CAM_TURN below — because the geometry
    snapping is correct and the VIEW snapping is not. */
 const TURN_B = 0;                                // no arc: streets meet square
-const CROSS_W = 300;                             // a side street is a STREET, not a stub
+const BLOCK = 160;   // city grid spacing: 8 beats, two bars, at UPB 20
 const fwdX = h => Math.sin(h), fwdZ = h => -Math.cos(h);
 const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
 
@@ -1370,6 +1370,8 @@ function pathInto(b, out){
   return out;
 }
 const PATH_A = {x:0,z:0,h:0}, PATH_B = {x:0,z:0,h:0}, PATH_C = {x:0,z:0,h:0};
+// Scratch for world->view of things that are not on the route at all.
+const VW = {x:0, z:0};
 
 /* THE FRAME, refreshed once a frame, and `place()` — the single funnel every
    draw site now goes through. Give it a beat and a lateral offset and it hands
@@ -3623,191 +3625,151 @@ function frame(now){
     }
   }
 
-  /* ── SOUL TOWN: THE BLOCK ─────────────────────────────────────────
-     Tenements and streetlights down both sides. Two things make this work and
-     both are worth stating.
+  /* ══ SOUL TOWN IS A CITY, NOT A ROUTE ═══════════════════════════════
+     This used to draw the road you were on and hang crossings off it, which
+     is why the town only existed where you were standing: turn twice and the
+     streets you turned off stopped being there, because nothing ever asked
+     the city what was around — it only asked the route where it went. One
+     road in sight, and a turn was a promise about geometry that did not exist
+     yet.
 
-     IT IS ANCHORED IN WORLD SPACE, not camera space. The deck loop above walks
-     z from +26 to -350 — camera-relative — which is right for something that
-     is the same at every point along the road. A building is NOT: it has a
-     position, and generating it from camera-relative z would rebuild it at a
-     different world point every frame, so the whole street would slide
-     backwards through itself. This loop walks WORLD distance in fixed 22-unit
-     lots and converts to camera z, so lot 41 is the same building on every
-     frame it is on screen.
+     So the city is a LATTICE now, drawn from the world rather than from your
+     path. Streets on every line of a fixed grid, blocks of building filling
+     the squares between them, all of it within a radius of wherever you
+     happen to be. The route is demoted to one sentence: which line am I on,
+     and which way am I pointing.
 
-     ITS RANDOMNESS IS A HASH OF THE LOT NUMBER, never Math.random(). Same
-     reason: a building has to be the same height on the frame after the one
-     you first saw it on. Hashing the lot index gives a street that is varied,
-     endless, free to generate and completely stable.
+     Three things fall out of that, and they are the reasons to do it:
+       · every road is on screen at once, so a turn is a choice between things
+         you can already see rather than a leap into fog;
+       · turning becomes a ROTATION onto a street that was always there, which
+         is why it can happen in the moment instead of being committed 16
+         beats early so the geometry has time to be built;
+       · the streets you have already driven are still behind you, because
+         they were never yours in the first place.
 
-     And they are REAL BOXES rather than the billboard skyline Atlantica uses,
-     because a street has to have depth you move through — the near ones must
-     slide past faster than the far ones, and the windows have to BE somewhere
-     rather than being painted on the horizon. */
+     BLOCK is 160 units — 8 beats, two bars. Every node length in NODES_STREET
+     (8 bars = 640, 6 bars = 480) is a whole number of blocks, so the path can
+     never come off the lattice, and the start (0,0) heading -Z is a grid line
+     by construction. That is not a coincidence to be maintained by hand: if a
+     node length stops dividing by 160 the roads and the road you drive part
+     company, which is worth knowing. */
   if(TRACK.world === 'street'){
-    const dNow = beat*UPB;
+    const ox = FRAME.o.x, oz = FRAME.o.z, R = 340;
+    const HALFR = LANE_W*LANES/2 + 0.9;              // half a carriageway
+    const i0 = Math.floor((ox - R)/BLOCK), i1 = Math.ceil((ox + R)/BLOCK);
+    const j0 = Math.floor((oz - R)/BLOCK), j1 = Math.ceil((oz + R)/BLOCK);
+    // A road along +Z is heading 0; a road along +X is heading a quarter turn.
+    const yawZ = -FRAME.camH, yawX = Math.PI/2 - FRAME.camH;
+    const hash = (a2, b2) => { const x = Math.sin(a2*127.1 + b2*311.7)*43758.5453; return x - Math.floor(x); };
 
-    /* ── THE CROSSING ────────────────────────────────────────────────
-       A side street you cannot see is not a choice, it is a trap. The gap in
-       the buildings said "something happens here"; this says what. At every
-       block boundary in range, road surface is laid ACROSS the one you are on
-       — same deck, same markings, turned a quarter turn — so the intersection
-       reads as a real crossroads from a long way off and you can see which way
-       the side street runs before you have to decide anything.
-
-       Drawn by sweeping the LATERAL offset at a fixed beat, which is exactly
-       what "perpendicular to the road here" means once place() exists. The
-       middle is skipped: the main deck already occupies it. */
-    for(const r of ROUTE){
-      const rb = r.startBeat;
-      if(rb <= 0) continue;
-      const ahead = (rb - beat)*UPB;
-      if(ahead > 330 || ahead < -30) continue;
-      const xhw = deckHalfW(rb);
-      const nearX = Math.max(0, 1 - ahead/330);
-      /* BOTH SIDE STREETS ARE DRAWN AS STREETS, all the way out to the fog.
-         They used to stop 52 units either side, which made an intersection
-         read as a widening rather than as a junction: you could see that the
-         road got fatter here, not that two more roads left from it. A turn you
-         cannot see the destination of is not a choice.
-
-         The step coarsens with distance — 6 units near the junction where the
-         perspective is doing real work, 18 far out where it is a line of dots
-         on the horizon — because a side street at a constant 6 costs 100
-         instances per junction per side and there are several junctions in
-         range at once. */
-      for(const sd of [-1, 1]){
-        for(let lat = xhw + 1, step = 6; lat <= CROSS_W; lat += step){
-          step = lat < 60 ? 6 : lat < 150 ? 10 : 18;
-          const P = place(rb, sd*lat);
-          const yw = P.yaw + Math.PI/2;                    // square to the CROSS street
-          const fade = Math.max(0, 1 - lat/CROSS_W);
-          pushInst(MESH_BOX, P.x, DECK_Y-0.2, P.z, xhw+0.9, 0.22, step*0.5,
-                   DECK[0], DECK[1], DECK[2], 0,0, 0, yw);
-          if(lat < 150)
-            pushInst(MESH_BOX, P.x, DECK_Y+0.03, P.z, 0.055, 0.03, 1.5,
-                     DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yw);
-          // A lamp every so often down the side street: without them it is a
-          // grey ribbon, and with them it is somewhere you could go.
-          if(lat > 20 && Math.round(lat) % 44 < step){
-            const Q = place(rb + 0.42*sd, sd*lat);
-            pushInst(MESH_SPH, Q.x, DECK_Y + 6.6, Q.z, 0.40, 0.26, 0.40,
-                     1.0,0.66,0.28, 0,0, 0.9*fade + 0.1);
+    /* THE CARRIAGEWAYS. Stepped coarser with distance — the near ones are
+       doing the perspective work and the far ones are a line on the horizon —
+       which is what keeps a whole city inside one instance buffer. */
+    for(let i=i0;i<=i1;i++){
+      const X = i*BLOCK;
+      for(let z = oz - R; z <= oz + R; ){
+        const dd = Math.hypot(X-ox, z-oz);
+        const step = dd < 70 ? 6 : dd < 170 ? 12 : 24;
+        if(dd <= R){
+          viewInto(X, z, FRAME.o, FRAME.ch, FRAME.sh, VW);
+          if(VW.z < 30 && VW.z > -352){
+            pushInst(MESH_BOX, VW.x, DECK_Y-0.2, VW.z, HALFR, 0.22, step*0.52,
+                     DECK[0], DECK[1], DECK[2], 0,0, 0, yawZ);
+            if(dd < 170)
+              pushInst(MESH_BOX, VW.x, DECK_Y+0.03, VW.z, 0.055, 0.03, 1.5,
+                       DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yawZ);
           }
         }
+        z += step;
       }
-      // A lamp on each far corner of the crossing — the thing that actually
-      // catches your eye from four blocks back.
-      for(const sx of [-1,1]) for(const sy of [-1,1]){
-        const P = place(rb + sy*0.42, sx*(xhw + 2.2));
-        pushInst(MESH_SPH, P.x, DECK_Y + 6.6, P.z, 0.40, 0.26, 0.40,
-                 1.0,0.66,0.28, 0,0, 1.0);
-        pushInst(MESH_BOX, P.x, DECK_Y + 3.4, P.z, 0.16, 7.0, 0.16,
-                 0.10,0.09,0.11, 0,0, 0, P.yaw);
+    }
+    for(let j=j0;j<=j1;j++){
+      const Z = j*BLOCK;
+      for(let x = ox - R; x <= ox + R; ){
+        const dd = Math.hypot(x-ox, Z-oz);
+        const step = dd < 70 ? 6 : dd < 170 ? 12 : 24;
+        if(dd <= R){
+          viewInto(x, Z, FRAME.o, FRAME.ch, FRAME.sh, VW);
+          if(VW.z < 30 && VW.z > -352){
+            pushInst(MESH_BOX, VW.x, DECK_Y-0.2, VW.z, HALFR, 0.22, step*0.52,
+                     DECK[0], DECK[1], DECK[2], 0,0, 0, yawX);
+            if(dd < 170)
+              pushInst(MESH_BOX, VW.x, DECK_Y+0.03, VW.z, 0.055, 0.03, 1.5,
+                       DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yawX);
+          }
+        }
+        x += step;
       }
-      // and the sodium wash lying in the junction itself
-      const C0 = place(rb, 0);
-      pushInst(MESH_BOX, C0.x, DECK_Y + 0.015, C0.z, xhw+0.6, 0.01, xhw+0.6,
-               0.52,0.29,0.11, 0,0, 0.22 + 0.14*nearX, C0.yaw);
     }
 
-    const LOT = 22;
-    const hash = (k, n) => { const x = Math.sin(k*127.1 + n*311.7)*43758.5453; return x - Math.floor(x); };
-    const k0 = Math.floor((dNow - 44)/LOT), k1 = Math.ceil((dNow + 336)/LOT);
-    for(let k = k0; k <= k1; k++){
-      const d  = k*LOT;
-      if(d - dNow > 336 || d - dNow < -44) continue;
-      const bb = d/UPB;
-      if(bb < 0) continue;
-      const hwb = deckHalfW(bb);
-      const far = Math.max(0, 1 - (d - dNow)/340);       // 1 near, 0 out at the fog
-      /* INTERSECTIONS ARE HOLES IN THE BLOCK. A corner has no building on it —
-         it has a crossing street — and this is not decoration, it is the
-         difference between a turn you can see through and a turn into a wall.
-         The first corner rendered pitch black: the camera leads into the bend
-         before the eye has reached it, so the sight line ran straight through
-         whatever stood on the corner, and what stood there was a tenement.
-         Clearing a block's width either side of every boundary opens the
-         crossing, and the buildings beyond it become the far side of the
-         junction — which is also what tells you an intersection is coming. */
-      let toCorner = 1e9;
-      for(const r of ROUTE) toCorner = Math.min(toCorner, Math.abs(bb - r.startBeat));
-      /* The clear zone has to be wider than the side street, not equal to it:
-         the tenements flanking the junction are what you look PAST to see
-         where the crossing goes, so anything inside a block's width of the
-         corner has to be absent rather than merely set back. */
-      const open4 = toCorner < 3.1;
-      for(const sx of [-1,1]){
-        const side = sx < 0 ? 0 : 1;
-        // Set back from the kerb, and never so tall near the camera that it
-        // eats the sky the road has to be read against.
-        const bh = 16 + hash(k, side)*30;
-        const bw = 7  + hash(k, side+2)*7;
-        const off = hwb + 8.5 + hash(k, side+4)*3.5;
-        const warm = 0.06 + hash(k, side+6)*0.05;
-        /* THE MELODY VIEW LOOKS THROUGH THIS ROW. The side camera sits at
-           cx0 + 46 — outside the right-hand kerb — so the +X row of buildings
-           stands directly between it and the track, and Soul Town's side view
-           was a letterbox of road glimpsed between tenements.
+    /* THE BLOCKS. One cell of the lattice is one city block: four slabs of
+       tenement set back from the four streets around it, so every street in
+       the city is walled on both sides by the blocks either side of it and no
+       building has to know which road it belongs to. Hashed off the cell
+       index, so a block is the same block every time you come back to it —
+       which is the whole point of a city you can explore.
 
-           They SINK rather than disappear. The instanced pass is opaque, so
-           there is no alpha to fade and popping a whole row out on a threshold
-           would be a visible cut in the middle of a camera move. Dropping them
-           by their own height plus clearance takes them under the road plane,
-           where the depth buffer hides them completely, and does it on the same
-           smooth sideMix the camera turn already rides — the city sinks away as
-           you lift off it. The far row stays: from up there it is the backdrop. */
-        if(open4) continue;                       // the corner is the crossing
-        const sink = sx > 0 ? Game.sideMix*(bh + 12) : 0;
-        // Square to ITS street, not to yours — which is the whole point of the
-        // yaw channel, and the difference between a city block and a billboard.
-        let P = place(bb, sx*(off + bw*0.5));
-        const byaw = P.yaw;
-        pushInst(MESH_BOX, P.x, DECK_Y - 2 + bh*0.5 - sink, P.z,
-                 bw, bh, 8.5,
-                 0.055 + warm*0.55, 0.048 + warm*0.34, 0.070 + warm*0.30, 0,0, 0, byaw);
-        // WINDOWS. Three per face, lit or dark on the same hash, so a block
-        // reads as somebody being up at one in the morning rather than as a
-        // texture. Only on the face turned toward the road.
+       The corners are left empty, which is what makes a junction see-through
+       in all four directions at once. */
+    const SET = HALFR + 7;                            // kerb to building line
+    for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+      const bx = i*BLOCK + BLOCK/2, bz = j*BLOCK + BLOCK/2;   // cell centre
+      if(Math.hypot(bx-ox, bz-oz) > R + BLOCK) continue;
+      for(let side=0; side<4; side++){
+        const along = side & 1;                        // 0: runs along Z, 1: along X
+        const sgn   = side < 2 ? -1 : 1;
+        const h  = 15 + hash(i*7+j, side)*30;
+        const len = BLOCK*0.30 + hash(i, j*3+side)*BLOCK*0.10;
+        const wx = along ? bx + sgn*0 : bx + sgn*(BLOCK/2 - SET);
+        const wz = along ? bz + sgn*(BLOCK/2 - SET) : bz;
+        const sink = Game.sideMix*(h + 12);
+        viewInto(wx, wz, FRAME.o, FRAME.ch, FRAME.sh, VW);
+        if(VW.z > 30 || VW.z < -352) continue;
+        const warm = 0.06 + hash(j, i+side)*0.05;
+        pushInst(MESH_BOX, VW.x, DECK_Y - 2 + h*0.5 - sink, VW.z,
+                 along ? len : 7.5, h, along ? 7.5 : len,
+                 0.055 + warm*0.55, 0.048 + warm*0.34, 0.070 + warm*0.30,
+                 0,0, 0, along ? yawZ : yawZ);
+        // windows: a couple per face, lit on the same hash
         for(let w=0; w<3; w++){
-          if(hash(k, side*8 + w + 11) < 0.42) continue;
-          const wy = DECK_Y + 2.5 + w*(bh/3.4) + hash(k, w+21)*1.2;
-          if(wy > DECK_Y - 2 + bh - 1.5) continue;
-          // Jittered ALONG the street in beats, so the jitter turns the corner
-          // with the building it belongs to.
-          P = place(bb + (hash(k,w+31)-0.5)*0.25, sx*(off - 0.05));
-          pushInst(MESH_BOX, P.x, wy - sink, P.z,
-                   0.12, 0.75, 1.05, 1.0, 0.80, 0.42, 0,0, 0.55 + 0.35*far, byaw);
+          if(hash(i*13+j, side*5+w) < 0.45) continue;
+          const wy = DECK_Y + 3 + w*(h/3.6);
+          if(wy > DECK_Y - 2 + h - 2) continue;
+          const jx = (hash(i, w+side)-0.5)*len*0.7;
+          viewInto(wx + (along ? jx : -sgn*3.9), wz + (along ? -sgn*3.9 : jx),
+                   FRAME.o, FRAME.ch, FRAME.sh, VW);
+          pushInst(MESH_BOX, VW.x, wy - sink, VW.z, 0.9, 0.7, 0.9,
+                   1.0, 0.80, 0.42, 0,0, 0.75);
         }
       }
-      /* STREETLIGHTS. Every other lot, both sides, and the reason the track
-         reads at all: the pool of light on the road is what gives the asphalt
-         a surface, and the lamp heads marching away are what give the street
-         its perspective. */
-      if(k % 2 === 0 && !open4){
-        for(const sx of [-1,1]){
-          const off = hwb + 1.9;
-          // Same reason as the buildings: the near row is between the melody
-          // camera and the staff. The lamps go down with their street.
-          const lsink = sx > 0 ? Game.sideMix*19 : 0;
-          let P = place(bb, sx*off);
-          const lyaw = P.yaw;
-          pushInst(MESH_BOX, P.x, DECK_Y + 3.4 - lsink, P.z, 0.16, 7.0, 0.16,
-                   0.10,0.09,0.11, 0,0, 0, lyaw);
-          P = place(bb, sx*(off - 0.85));
-          pushInst(MESH_BOX, P.x, DECK_Y + 6.9 - lsink, P.z,
-                   0.95, 0.12, 0.16, 0.12,0.11,0.12, 0,0, 0, lyaw);
-          P = place(bb, sx*(off - 1.5));
-          pushInst(MESH_SPH, P.x, DECK_Y + 6.6 - lsink, P.z,
-                   0.40, 0.26, 0.40, 1.0,0.66,0.28, 0,0, 1.0);
-          /* The pool it throws. Dark base colour carrying most of its light in
-             GLOW rather than in albedo — at full brightness these read as
-             glowing slabs lying on the road instead of light falling on it,
-             and the road stops being a surface. */
-          P = place(bb, sx*(off - 2.4));
-          pushInst(MESH_BOX, P.x, DECK_Y + 0.02, P.z,
-                   1.7, 0.01, 2.6, 0.52,0.29,0.11, 0,0, 0.30 + 0.16*far, lyaw);
+    }
+
+    /* STREETLIGHTS, one pair per block face, and the pools they throw. These
+       are what give the asphalt a surface and the distance its perspective. */
+    for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+      const X = i*BLOCK, Z = j*BLOCK;
+      for(const [lx, lz] of [[X, Z + BLOCK/2], [X + BLOCK/2, Z]]){
+        const dd = Math.hypot(lx-ox, lz-oz);
+        if(dd > R) continue;
+        const alongX = (lx !== X);
+        for(const sg of [-1, 1]){
+          const px2 = alongX ? lx : lx + sg*(HALFR + 1.6);
+          const pz2 = alongX ? lz + sg*(HALFR + 1.6) : lz;
+          const sink = Game.sideMix*19;
+          viewInto(px2, pz2, FRAME.o, FRAME.ch, FRAME.sh, VW);
+          if(VW.z > 30 || VW.z < -352) continue;
+          pushInst(MESH_BOX, VW.x, DECK_Y + 3.4 - sink, VW.z, 0.16, 7.0, 0.16,
+                   0.10,0.09,0.11, 0,0, 0, yawZ);
+          pushInst(MESH_SPH, VW.x, DECK_Y + 6.6 - sink, VW.z, 0.40, 0.26, 0.40,
+                   1.0,0.66,0.28, 0,0, 1.0);
+          if(dd < 200){
+            const qx = alongX ? lx : lx + sg*(HALFR - 1.0);
+            const qz = alongX ? lz + sg*(HALFR - 1.0) : lz;
+            viewInto(qx, qz, FRAME.o, FRAME.ch, FRAME.sh, VW);
+            pushInst(MESH_BOX, VW.x, DECK_Y + 0.02, VW.z, 1.7, 0.01, 2.6,
+                     0.52,0.29,0.11, 0,0, 0.34, alongX ? yawX : yawZ);
+          }
         }
       }
     }
