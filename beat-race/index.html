@@ -2029,12 +2029,65 @@ const p = i => PENT[Math.max(0, Math.min(PENT.length-1, i))];
 // never leaves the scale and no voice can collide with another.
 let ROOTS = [0, 1, 4, 2];                   // A · C · G · D  (degree index)
 let NOTE_NAMES = ['A','C','D','E','G'];     // the fret labels, per track
-/* Jamerson in a table. Sixteenth slot → degree offset from the bar's root.
-   It walks up to the fifth and comes back down through the third, which is
-   the shape of half the basslines cut in that room, and because it is stated
-   as OFFSETS the same eight notes become a different line every bar as the
-   I–vi–ii–V moves underneath. */
-const SOUL_BASS = [[0,0],[3,0],[6,2],[8,3],[10,2],[12,1],[14,0],[15,-1]];
+/* ══ THE GROOVE, IN FOUR TABLES ═══════════════════════════════════════
+   Everything the drums and the bass do lives here, as four bars rather than
+   one, and that is the entire fix for "there is no groove".
+
+   The old bed was ONE bar of everything, repeated. One kick pattern, one
+   eight-note bass figure, one chank, and only the root moved underneath —
+   which is a loop, not a groove. A groove is a four-bar sentence: it states
+   something, answers it, sits back, and then drives into the turnaround. You
+   feel the four because the bars are not the same, and you cannot feel it at
+   all when they are.
+
+   `s` is the 16th slot inside the bar. Bass values are OFFSETS in scale
+   degrees from whatever the bar's root is, so the same written line becomes a
+   new line as the I–vi–ii–V moves under it — and because everything is
+   pentatonic, still nothing can collide.                                    */
+
+/* THE KICK. 1 and 3 are the floor and appear in every bar; everything else is
+   the syncopation, and it is different every bar. Bar 2 pushes an 8th early
+   into bar 3, bar 4 drives four-to-the-floor into the turnaround. */
+const SOUL_KICK = [
+  [0, 6, 8],              // 1 · 2& · 3
+  [0, 8, 14],             // 1 · 3 · 4&      — leans into the next bar
+  [0, 3, 8, 11],          // 1 · 1a · 3 · 3a — the busy one
+  [0, 8, 12, 14]          // 1 · 3 · 4 · 4&  — hands over to the top
+];
+
+/* GHOST NOTES on the snare, and this is most of what "feel" actually is. A
+   backbeat on its own is a metronome hitting 2 and 4; the quiet 16ths between
+   them are what make a drummer sound like a person. They sit at a tenth of
+   the backbeat's level — you do not hear them, you hear their absence. */
+const SOUL_GHOST = [
+  [7, 10, 15],
+  [2, 6, 11],
+  [3, 7, 10, 15],
+  [2, 10, 14]
+];
+
+/* THE BASSLINE. Jamerson's job: not the root under the chord but a
+   countermelody with more notes in it than the tune. Four distinct bars —
+   states the tonic, darkens on the vi, opens up on the ii, then climbs the
+   whole scale on the V and hands back to the top. */
+const SOUL_BASS4 = [
+  [[0,0],[3,0],[6,3],[8,0],[11,2],[12,1],[14,0],[15,3]],      // I  — the statement
+  [[0,0],[2,0],[5,2],[8,3],[10,4],[12,3],[14,2],[15,0]],      // vi — the answer, busier
+  [[0,0],[4,3],[7,2],[8,0],[12,-1],[14,0]],                   // ii — sits back
+  [[0,0],[3,2],[6,3],[8,4],[10,5],[12,4],[14,3],[15,2]]       // V  — climbs out
+];
+
+/* THE HORN RIFF. Once every EIGHT bars, and that rarity is the point — the
+   old bed put a horn stab on every fourth bar and another one every fourth
+   note the player caught, which is a section that never stops playing and the
+   fastest way to make brass boring. A riff you hear twice a minute is a hook.
+   The same line four times a minute is wallpaper. */
+const HORN_RIFF = [[8,14,0.11],[10,12,0.088],[11,14,0.080],[12,16,0.135],[15,14,0.095]];
+
+/* WHICH OFFBEAT THE GUITAR SITS OUT, per bar of the four. A chank on all four
+   offbeats of every bar is a metronome with a chord on it; one hole a bar, in
+   a different place each bar, is a player. */
+const CHANK_REST = [10, 6, 14, 2];
 
 /* ── THE TRACKS ─────────────────────────────────────────────────────────
    Everything that makes one track not the other, in one table. Adding a third
@@ -2108,6 +2161,14 @@ const Clock = {
     if(this.started) return;
     this.bpm = GEARS[this.gear];              // the chosen track's tempo range
     this.ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+    /* HEADROOM IS A GROOVE DECISION. The bed is metered rather than guessed at:
+       with the four-bar rewrite in and every layer at its first-draft level,
+       the master bus peaked at 1.08 — which the limiter below catches, so
+       nothing distorts, but catching it means several dB of gain reduction
+       riding on every backbeat. A compressor working that hard flattens
+       exactly the transients a groove is made of: the snare stops cracking and
+       the kick stops arriving. Levels were pulled back until the bus peaks
+       under 0.9 and the limiter is only shaving the loudest hits. */
     this.master = this.ctx.createGain(); this.master.gain.value = volume * 0.8;
     const comp = this.ctx.createDynamicsCompressor();
     comp.threshold.value = -11; comp.ratio.value = 5;
@@ -2619,9 +2680,9 @@ const Clock = {
 
      THE BASS IS A MELODY. A house bassline is the root in the holes the kick
      leaves. A Motown bassline is a countermelody with more notes in it than
-     the tune, walking the pentatonic under the singer. That is what SOUL_BASS
-     is: sixteenth-grid, moving, and different every bar because the root moves
-     underneath it.
+     the tune, walking the pentatonic under the singer. That is SOUL_BASS4:
+     four WRITTEN bars, not one figure with a moving root under it — see the
+     note on the tables themselves for why the difference is the whole groove.
 
      I–vi–ii–V. C · A · D · G, all four inside C major pentatonic, so the
      "you cannot play a wrong note" guarantee survives a real chord progression
@@ -2654,24 +2715,31 @@ const Clock = {
   SIDE_ROOTS: [4, 4, 3, 3],
   bedStreet(step, t){
     const s16 = step % 16, bar = Math.floor(step/16);
+    const b4 = ((bar % 4) + 4) % 4, b8 = ((bar % 8) + 8) % 8;
     /* WHICH STREET, AT THIS 16TH. The scheduler runs 120ms ahead, so this is
        effectively "now": turn at a crossing and the very next 16th is already
        playing the new street. No fade, no bar-line wait - a corner is an edit. */
     const cls = TRACK.grid ? streetClsAt(step/4) : 5;
     const main = cls >= 5, side = cls === 3, alley = cls <= 1;
-    /* THE HARMONY MOVES WITH THE ROAD. An alley pedals the tonic - one chord,
-       one note, no motion, which is what makes it read as a hole in the record
-       rather than a quieter version of it. */
-    /* THE HARMONY STILL MOVES ON THE BAR, on every street. An alley pedalled a
-       single degree for its whole length, which stopped the progression dead
-       for two bars and then rejoined it mid-cycle — the harmonic rhythm itself
-       was changing with the road, and that is the one layer that has to keep
-       time. It alternates root and fifth now: still a pedal, still the
-       emptiest harmony in the track, but it breathes on the bar like
-       everything else. */
-    const root = alley ? (bar % 2 ? ROOTS[3] : ROOTS[0])
-                       : (side ? this.SIDE_ROOTS : ROOTS)[bar % 4];
+    /* THE HARMONY MOVES ON THE BAR, on every street. An alley alternates root
+       and fifth: still the emptiest harmony in the track, still breathing on
+       the bar like everything else. */
+    const rootOf = k => alley ? (k % 2 ? ROOTS[3] : ROOTS[0])
+                              : (side ? this.SIDE_ROOTS : ROOTS)[((k % 4) + 4) % 4];
+    const root = rootOf(bar), rootNext = rootOf(bar + 1);
     const c = this.ctx, D = this.duck, K = D;
+    const spb = this.spb();
+    /* THE LILT. A light swing, and it is on the ORNAMENTS only — the offbeat
+       tambourine, the ghost notes, the shaker. Not the kick, not the snare,
+       not the bass, and not the player: those stay dead on the grid, because
+       the chart is drawn on the grid and a rhythm game that plays behind its
+       own picture is a rhythm game that feels broken.
+
+       Five per cent of a beat is small enough that nobody can name it and
+       large enough that the bar stops marching. It is the difference between
+       a drum machine and a room. */
+    const SWG = spb*0.05;
+
     /* THE ROOM NARROWS TOO. A slap-back is a reflection off a wall, and in an
        alley the wall is four feet away - so the send goes up as the street
        closes in. Set once a bar, ramped, so it is a room and not an effect
@@ -2680,34 +2748,38 @@ const Clock = {
       this.fx.gain.setTargetAtTime(TRACK.echo.send * (alley ? 2.1 : side ? 1.45 : 1.0),
                                    t, 0.25);
 
-    /* KICK — 1 and 3, with a pickup 16th ahead of the 3 that makes the bar
-       lean forward. Rounder than the house kick: a shorter pitch drop from a
-       lower start, and only a whisper of beater click. It holds the floor
-       rather than being the event. */
-    if(s16 === 0 || s16 === 8 || s16 === 14){
-      const soft = s16 === 14 ? 0.34 : 1;
+    /* ── KICK ──────────────────────────────────────────────────────
+       Off the four-bar table, so 1 and 3 hold the floor in every bar and the
+       syncopation between them is never the same two bars running. Rounder
+       than the house kick: a short drop from a low start and a whisper of
+       beater. It holds the floor rather than being the event. */
+    const kicks = SOUL_KICK[b4];
+    if(kicks.indexOf(s16) >= 0){
+      const soft = (s16 === 0 || s16 === 8) ? 1 : 0.42;   // anchors loud, pushes light
       const o = c.createOscillator(), g = c.createGain();
       o.type = 'sine';
-      o.frequency.setValueAtTime(118, t);
-      o.frequency.exponentialRampToValueAtTime(46, t + 0.055);
+      o.frequency.setValueAtTime(120, t);
+      o.frequency.exponentialRampToValueAtTime(45, t + 0.055);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.95*soft, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.86*soft, t + 0.005);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
       o.connect(g).connect(this.kickDrive);
       o.start(t); o.stop(t + 0.38);
       this.noise(t, 0.006, 2000, 'highpass', 0.10*soft, this.kickDrive);
-      // Barely a duck. Named and kept so the contrast with bedWater is on the
-      // record: this is the same line of code doing a quarter of the work.
-      /* EXCEPT IN AN ALLEY, where it ducks like house does. With the horns,
-         the chank and most of the bass gone there is nothing holding the floor
-         between the drums, so the mix is allowed to breathe - and the pump is
-         what turns four bars of near-silence into a break instead of a gap. */
-      D.gain.setValueAtTime(alley ? 0.52 : 0.90, t);
-      D.gain.exponentialRampToValueAtTime(1.0, t + (alley ? 0.19 : 0.10));
+      /* Barely a duck — except in an alley, where it ducks like house does.
+         With the chank, the horns and most of the bass gone there is nothing
+         holding the floor between the drums, and the pump is what turns four
+         bars of near-silence into a break instead of a gap. */
+      if(soft > 0.9){
+        D.gain.setValueAtTime(alley ? 0.52 : 0.90, t);
+        D.gain.exponentialRampToValueAtTime(1.0, t + (alley ? 0.19 : 0.10));
+      }
     }
 
-    /* SNARE + HANDCLAPS on 2 and 4 — the hardest hit in the bar. The clap is
-       three noise bursts a few ms apart, which is what a room full of people
+    /* ── SNARE, CLAPS AND GHOSTS ───────────────────────────────────
+       The backbeat is the hardest hit in the bar and never moves — it is the
+       one thing in this track you can set your watch by. The claps are three
+       noise bursts a few ms apart, which is what a room full of people
        clapping actually is and why one sample never sounds right. */
     if(s16 === 4 || s16 === 12){
       const sn = c.createOscillator(), sg = c.createGain();
@@ -2715,120 +2787,176 @@ const Clock = {
       sn.frequency.setValueAtTime(232, t);
       sn.frequency.exponentialRampToValueAtTime(178, t + 0.05);
       sg.gain.setValueAtTime(0.0001, t);
-      sg.gain.exponentialRampToValueAtTime(0.52, t + 0.003);
+      sg.gain.exponentialRampToValueAtTime(0.46, t + 0.003);
       sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
       sn.connect(sg).connect(this.drive); sn.start(t); sn.stop(t + 0.20);
-      this.noise(t, 0.11, 2100, 'bandpass', 0.46, K);
+      this.noise(t, 0.11, 2100, 'bandpass', 0.40, K);
       for(let i=0;i<3;i++) this.noise(t + 0.004 + i*0.011, 0.05, 1500, 'bandpass', 0.30, K);
       this.noise(t + 0.002, 0.16, 3600, 'highpass', 0.16, K);
     }
+    // And the ghosts between them, swung, at a tenth of the level.
+    if(SOUL_GHOST[b4].indexOf(s16) >= 0){
+      const gt = t + (s16 % 2 ? SWG : 0);
+      this.noise(gt, 0.035, 1900, 'bandpass', alley ? 0.040 : 0.055, K);
+      this.noise(gt + 0.003, 0.02, 3800, 'highpass', 0.030, K);
+    }
 
-    /* TAMBOURINE — every 8th, and harder on the offbeat. Short, bright, and
-       slightly different every hit, because a tambourine is a handful of
-       jingles and never lands twice the same way. */
-    /* TAMBOURINE — ON EVERY 8TH, ON EVERY STREET, ALWAYS.
-
-       This track's own instructions say "the tambourine is the grid", and the
-       first pass took it at its word in the wrong direction: it thinned to the
-       quarters on a side street and was replaced outright by a rim stick in an
-       alley. Which removed the pulse exactly when the chart, the bassline, the
-       chords and the room were all changing too — four things moving at once
-       and nothing holding the beat, every eight beats. That is most of why the
-       groove went missing.
-
-       So the grid is now the one thing a turn CANNOT touch. Every 8th, hard on
-       the offbeat, on all three streets. What the street changes is the TONE
-       of it — bright and ringing on the boulevard, drier and closer indoors, a
-       tambourine held tight against the hand in an alley with a stick doubling
-       it — and the level, never the placement. You always know where you are. */
+    /* ── TAMBOURINE ────────────────────────────────────────────────
+       On every 8th, on every street, always. This track's own instructions
+       say the tambourine is the grid, and a grid that thins out when the road
+       does is not a grid. The street changes its TONE and its level, never
+       its placement — and the offbeat carries the lilt. */
     if(s16 % 2 === 0){
-      const off = (s16 % 4 === 2);
-      const lvl = alley ? 0.78 : side ? 0.88 : 1.0;         // quieter, never absent
-      const hz  = alley ? 5200 : side ? 6600 : 7600;        // and duller, never gone
-      const g = (off ? 0.20 : 0.11) * (0.86 + Math.random()*0.28) * lvl;
-      this.noise(t, off ? (alley ? 0.042 : 0.075) : 0.045,
+      const off = (s16 % 4 === 2), tt = t + (off ? SWG : 0);
+      const lvl = alley ? 0.78 : side ? 0.88 : 1.0;
+      const hz  = alley ? 5200 : side ? 6600 : 7600;
+      const g = (off ? 0.21 : 0.11) * (0.86 + Math.random()*0.28) * lvl;
+      this.noise(tt, off ? (alley ? 0.042 : 0.075) : 0.045,
                  hz + Math.random()*1800, 'highpass', g, K);
-      this.noise(t + 0.006, 0.03, alley ? 8000 : 11000, 'highpass', g*0.5, K);
+      this.noise(tt + 0.006, 0.03, alley ? 8000 : 11000, 'highpass', g*0.5, K);
       // Indoors the offbeat gets a stick ON TOP of the tambourine, not instead
       // of it: the same grid, struck harder, in a smaller room.
       if(off && !main){
-        this.noise(t, 0.018, 6200, 'bandpass', side ? 0.07 : 0.11, K);
-        this.tone(t, side ? 1320 : 1180, 'square', 0.001, 0.022, side ? 0.04 : 0.07, 4600, K);
+        this.noise(tt, 0.018, 6200, 'bandpass', side ? 0.07 : 0.11, K);
+        this.tone(tt, side ? 1320 : 1180, 'square', 0.001, 0.022, side ? 0.04 : 0.07, 4600, K);
       }
     }
+    /* A SHAKER on the odd 16ths, swung, and so quiet it is felt rather than
+       heard — it is the layer that makes the space between the 8ths move.
+       Boulevard only: it is the first thing that would clutter a small room. */
+    if(main && s16 % 2 === 1)
+      this.noise(t + SWG, 0.020, 9000 + Math.random()*2500, 'highpass',
+                 0.018 + Math.random()*0.009, K);
 
-    /* THE BASSLINE. Sixteenth grid, degree offsets from the bar's own root,
-       so the same figure becomes a new line every bar as the progression
-       moves under it. Triangle through a resonant lowpass with a fast attack:
-       a wound string on a hollow body, not a synth. */
-    /* THE BASSLINE, AND HOW MUCH OF IT. A walking line needs room to walk;
-       the narrower the street the less of it there is. A side street keeps the
-       first half of the figure - the walk up, not the way back down - and an
-       alley keeps one note per half bar and holds it, which is the pedal the
-       break sits on. */
-    for(const [ss, dd] of SOUL_BASS){
+    /* ── THE BASSLINE ──────────────────────────────────────────────
+       Four written bars, not one figure with a moving root. Triangle through
+       a resonant lowpass with a fast attack: a wound string on a hollow body,
+       not a synth.
+
+       THE LAST 16TH OF EVERY BAR PLAYS THE NEXT BAR'S ROOT. Anticipating the
+       chord change by a 16th is the oldest trick in soul bass playing and the
+       reason a good line pulls you into the next bar instead of arriving at
+       it — the harmony moves before the beat that owns it does. */
+    for(const [ss, dd] of SOUL_BASS4[b4]){
       if(ss !== s16) continue;
       if(alley && ss !== 0 && ss !== 8) continue;
-      if(side && ss > 8) continue;
-      let deg = root + (alley ? 0 : dd);
-      while(deg > 8) deg -= 5;                 // an octave is five degrees here
+      if(side && (ss % 2) === 1) continue;              // indoors: the 8ths only
+      const early = (ss === 15);
+      let deg = (early ? rootNext : root) + (alley ? (s16 === 8 ? 3 : 0) : dd);
+      while(deg > 8) deg -= 5;
       const f = p(Math.max(0, deg));
       const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
       o.type = 'triangle'; o.frequency.value = f;
       lp.type = 'lowpass'; lp.Q.value = 4;
       lp.frequency.setValueAtTime(f*9, t);
       lp.frequency.exponentialRampToValueAtTime(f*2.6, t + 0.10);
-      const bdur = alley ? 0.62 : 0.24;              // the pedal is HELD
+      const bdur = alley ? 0.62 : (ss % 2 ? 0.15 : 0.26);   // offbeats clipped short
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(alley ? 0.50 : 0.42, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(alley ? 0.44 : 0.38, t + 0.008);
       g.gain.exponentialRampToValueAtTime(0.0001, t + bdur);
       o.connect(lp).connect(g).connect(K);
       o.start(t); o.stop(t + bdur + 0.04);
     }
 
-    /* THE CHANK — a short chord on every offbeat 8th, the guitar-and-piano
-       upstroke that fills the space between the kick and the snare. Three
-       consecutive pentatonic degrees, so it is a real triad and cannot clash
-       with anything the player does above it. */
-    if(s16 % 4 === 2 && !alley && !(side && s16 === 2)){
+    /* ── THE CHANK ─────────────────────────────────────────────────
+       The guitar-and-piano upstroke on the offbeat 8ths that fills the space
+       between the kick and the snare. Three consecutive pentatonic degrees, so
+       it is a real triad and cannot clash with anything the player does above
+       it — and it DROPS OUT on one offbeat a bar, different each bar, because
+       a chank on all four is a metronome with a chord on it. */
+    if(s16 % 4 === 2 && !alley && s16 !== CHANK_REST[b4]){
+      const voice = b4 % 2 ? 11 : 10;
       for(let i=0;i<3;i++){
         const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
-        o.type = 'triangle'; o.frequency.value = p(root + 10 + i);
+        o.type = 'triangle'; o.frequency.value = p(root + voice + i);
         o.detune.value = (i-1)*4;                       // a room, not a chip
         lp.type = 'lowpass'; lp.frequency.value = 2600;
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(0.11, t + 0.006);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+        g.gain.setValueAtTime(0.0001, t + SWG);
+        g.gain.exponentialRampToValueAtTime(side ? 0.070 : 0.095, t + SWG + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + SWG + 0.13);
         o.connect(lp).connect(g).connect(K);
-        o.start(t); o.stop(t + 0.16);
+        o.start(t + SWG); o.stop(t + SWG + 0.16);
       }
     }
 
-    /* HORNS on the turnaround. Last bar of the four, answering the phrase —
-       a section always announced the end of a verse, and it is the one place
-       the bed is allowed to be loud. */
-    if(main && bar % 4 === 3 && (s16 === 8 || s16 === 14)){
-      const hi = s16 === 14;
-      for(const d of (hi ? [12, 14] : [10, 12, 14])){
-        const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
-        o.type = 'sawtooth'; o.frequency.value = p(root + d);
-        bp.type = 'bandpass'; bp.Q.value = 1.6; bp.frequency.value = p(root + d)*2.2;
+    /* ── THE ORGAN ─────────────────────────────────────────────────
+       One held chord a bar, under everything, so quiet you only notice it
+       when the alley takes it away. This is what the horns were being asked
+       to do and could not: fill the middle of the mix continuously. Brass is
+       an EVENT and turns to wallpaper the moment it is asked to be a texture;
+       a drawbar organ is a texture and never tires, which is exactly why every
+       record cut in that room has one and why you cannot hum it. */
+    if(s16 === 0 && !alley){
+      const dur = spb*4;
+      for(const d of [10, 12, 14]){
+        const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
+        o.type = 'sine'; o.frequency.value = p(root + d);
+        o.detune.value = (Math.random()-0.5)*6;
+        lp.type = 'lowpass'; lp.frequency.value = 1700;
         g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(hi ? 0.15 : 0.19, t + 0.020);
-        g.gain.setValueAtTime(hi ? 0.15 : 0.19, t + (hi ? 0.10 : 0.16));
-        g.gain.exponentialRampToValueAtTime(0.0001, t + (hi ? 0.20 : 0.34));
-        o.connect(bp).connect(g).connect(K);
-        const sd = c.createGain(); sd.gain.value = 0.5; g.connect(sd).connect(this.fx);
-        o.start(t); o.stop(t + 0.40);
+        g.gain.exponentialRampToValueAtTime(side ? 0.019 : 0.026, t + 0.10);
+        g.gain.setValueAtTime(side ? 0.019 : 0.026, t + dur*0.72);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur*0.98);
+        o.connect(lp).connect(g).connect(K);
+        o.start(t); o.stop(t + dur);
+      }
+    }
+
+    /* ── THE HORN RIFF, once every eight bars ──────────────────────
+       Not a stab on the turnaround of every four. A written five-note line
+       that lands on the last bar of the phrase and answers everything that
+       came before it, so it arrives about twice a minute and is a HOOK rather
+       than a habit. Boulevard only — the section does not follow you into an
+       alley. */
+    if(main && b8 === 7){
+      for(const [ss, dd, lvl] of HORN_RIFF){
+        if(ss !== s16) continue;
+        for(const det of [-7, 7]){
+          const f0 = p(root + dd);
+          const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
+          o.type = 'sawtooth'; o.detune.value = det;
+          o.frequency.setValueAtTime(f0*0.955, t);        // the doit into the note
+          o.frequency.exponentialRampToValueAtTime(f0, t + 0.035);
+          bp.type = 'bandpass'; bp.Q.value = 1.5; bp.frequency.value = f0*2.3;
+          g.gain.setValueAtTime(0.0001, t);
+          g.gain.exponentialRampToValueAtTime(lvl, t + 0.018);
+          g.gain.setValueAtTime(lvl, t + 0.10);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
+          o.connect(bp).connect(g).connect(K);
+          const sd = c.createGain(); sd.gain.value = 0.5; g.connect(sd).connect(this.fx);
+          o.start(t); o.stop(t + 0.34);
+        }
+      }
+    }
+
+    /* ── THE FILL ──────────────────────────────────────────────────
+       The last beat of every eight bars. A groove with no fill in it is a
+       loop with no seams, and the seams are how you know where you are: the
+       fill is the only thing in the bed that tells you a phrase just ended
+       and another is starting. Snare 16ths climbing, and a tom on the way out.
+       Everywhere, including the alley — a break still has to breathe. */
+    if(b8 === 7 && s16 >= 12){
+      const u = (s16 - 12)/3;
+      this.noise(t, 0.05, 1800 + u*900, 'bandpass', 0.13 + u*0.24, K);
+      this.noise(t + 0.004, 0.03, 3600, 'highpass', 0.06 + u*0.10, K);
+      if(s16 === 15){
+        const o = c.createOscillator(), g = c.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(190, t);
+        o.frequency.exponentialRampToValueAtTime(96, t + 0.14);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.46, t + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+        o.connect(g).connect(this.drive); o.start(t); o.stop(t + 0.30);
       }
     }
 
     /* VINYL. A record is not silent between the notes — it ticks. Sparse,
-       random, and quiet enough that you only notice it when it stops. */
-    /* Louder in an alley, because in an alley the record is not the mix: it is
-       somebody's window, two floors up, and it is the only thing there. */
+       random, and quiet enough that you only notice it when it stops. Louder
+       in an alley, where the record is not the mix: it is somebody's window,
+       two floors up, and it is the only thing there. */
     if(Math.random() < (alley ? 0.55 : 0.30))
-      this.noise(t + Math.random()*this.spb()*0.25, 0.004,
+      this.noise(t + Math.random()*spb*0.25, 0.004,
                  2600 + Math.random()*5200, 'highpass',
                  (alley ? 0.020 : 0.010) + Math.random()*(alley ? 0.040 : 0.022),
                  this.master);
@@ -2863,28 +2991,47 @@ const Clock = {
      played harder rather than two different sounds.
 
      Through the slap-back with everything else, because it is in the room. */
-  hornShout(v, oct){
+  hornShout(v, oct, chain){
     if(!this.started) return;
     const c = this.ctx, t = c.currentTime;
     const top = 10 + v*2 + (oct ? 5 : 0);
-    for(const [d, lvl] of [[top, 0.15], [top+2, 0.12], [top-3, 0.09]]){
-      const f0 = p(d);
-      const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
-      o.type = 'sawtooth';
-      // The doit: up a semitone-and-a-bit in 40ms, then hold.
-      o.frequency.setValueAtTime(f0*0.94, t);
-      o.frequency.exponentialRampToValueAtTime(f0, t + 0.040);
-      o.detune.value = (Math.random()-0.5)*9;          // four men, not one patch
-      bp.type = 'bandpass'; bp.Q.value = 1.5;
-      bp.frequency.setValueAtTime(f0*1.5, t);
-      bp.frequency.exponentialRampToValueAtTime(f0*(2.4 + v*0.35), t + 0.07);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(lvl*(0.8 + v*0.12), t + 0.022);
-      g.gain.setValueAtTime(lvl*(0.8 + v*0.12), t + 0.14);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
-      o.connect(bp).connect(g).connect(this.duck);
-      const sd = c.createGain(); sd.gain.value = 0.55; g.connect(sd).connect(this.fx);
-      o.start(t); o.stop(t + 0.46);
+    /* THREE SHAPES, ROTATING. One gesture repeated is one gesture repeated
+       however good it is, and this fires often enough that "how good" stops
+       mattering by the third time. A punch, a smear and a swell — same
+       section, same register, three different things to do with it, so the
+       one you hear next is never the one you just heard.
+
+       Quieter and shorter than it was, too: an answer is supposed to sit
+       behind the phrase you played, not on top of it. */
+    const shape = Math.floor((chain || 8)/8) % 3;
+    const voices = shape === 0 ? [[top, 0], [top+2, 0.075]]              // punch
+                 : shape === 1 ? [[top-3, 0], [top+2, 0.10]]             // smear up
+                 :               [[top, 0], [top+2, 0], [top+4, 0]];     // swell
+    for(const [d, dt2] of voices){
+      const tt = t + dt2, f0 = p(d);
+      for(const det of [-6, 6]){
+        const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
+        o.type = 'sawtooth'; o.detune.value = det;
+        if(shape === 1){                                   // the smear slides in
+          o.frequency.setValueAtTime(f0*0.86, tt);
+          o.frequency.exponentialRampToValueAtTime(f0, tt + 0.10);
+        } else {
+          o.frequency.setValueAtTime(f0*0.94, tt);
+          o.frequency.exponentialRampToValueAtTime(f0, tt + 0.035);
+        }
+        bp.type = 'bandpass'; bp.Q.value = 1.5;
+        bp.frequency.setValueAtTime(f0*1.5, tt);
+        bp.frequency.exponentialRampToValueAtTime(f0*(2.3 + v*0.3), tt + 0.07);
+        const lvl = (shape === 2 ? 0.075 : 0.105) * (0.85 + v*0.06);
+        const hold = shape === 2 ? 0.34 : 0.11;
+        g.gain.setValueAtTime(0.0001, tt);
+        g.gain.exponentialRampToValueAtTime(lvl, tt + (shape === 2 ? 0.09 : 0.018));
+        g.gain.setValueAtTime(lvl, tt + hold);
+        g.gain.exponentialRampToValueAtTime(0.0001, tt + hold + 0.22);
+        o.connect(bp).connect(g).connect(this.duck);
+        const sd = c.createGain(); sd.gain.value = 0.5; g.connect(sd).connect(this.fx);
+        o.start(tt); o.stop(tt + hold + 0.26);
+      }
     }
   },
   turnStab(fromCls, toCls){
@@ -3441,8 +3588,14 @@ const Game = {
        1965 — a synthesised vowel in the middle of a horn band, and it read as
        exactly that. Soul Town answers with the SECTION instead, because on
        these records what answers the singer is four men with brass. */
-    if(this.flowChain % 4 === 0)
-      Clock[TRACK.answer](Math.min(3, Math.floor(this.flowChain/4)), oct);
+    /* EVERY EIGHTH LINK, NOT EVERY FOURTH. At every fourth, with notes on the
+       8ths, the section answered you about once a bar for as long as you were
+       playing well — which is not a section answering, it is a section that
+       never stops, and it is why the brass turned to wallpaper. Half as often,
+       and the chain count is passed through so consecutive answers are not the
+       same gesture twice. */
+    if(this.flowChain % 8 === 0)
+      Clock[TRACK.answer](Math.min(3, Math.floor(this.flowChain/8)), oct, this.flowChain);
     // Escalation: a gear every 8 links. Tempo climbs, and because node density
     // is baked from the gear you were in, the CHART subdivides behind it too.
     if(this.flowChain % 8 === 0) Clock.setGear(Clock.gear+1);
