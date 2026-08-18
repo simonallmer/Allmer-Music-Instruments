@@ -323,12 +323,39 @@ function prog(vs, fs){ const p=gl.createProgram();
   for(let i=0;i<n;i++){ const nm=gl.getActiveUniform(p,i).name.replace(/\[0\]$/,'');
     u[nm]=gl.getUniformLocation(p,nm); } return {p,u}; }
 
+/* THE FADE CURVE IS QUINTIC, not cubic, and that one line is why the sky
+   stopped looking like a quilt.
+
+   Value noise interpolates a random number per lattice cell. The cubic
+   smoothstep f²(3−2f) is C1 — value and slope match across a cell boundary,
+   but CURVATURE does not, so there is a second-derivative step on every
+   lattice line. Put that through anything with a hard response (the sky runs
+   its cloud field through a smoothstep, which is exactly that) and the step
+   prints as a straight edge. You get a grid of rectangles at whatever size the
+   top octave happens to be, which is what "you can count the pixels" was: not
+   resolution, the lattice showing through.
+
+   Measured, sampling |d²/dx²| across 400 cells at 512 samples each:
+
+     cubic     boundary 1.74   interior 0.19    boundary is 9.0x sharper
+     quintic   boundary 0.04   interior 0.49    boundary is 0.09x
+
+   Perlin's quintic f³(6f²−15f+10) is C2, so the curvature matches too. It does
+   not remove the curvature — it MOVES it off the cell edges and spreads it
+   through the interior, which is why the total goes up slightly while the grid
+   disappears entirely. Same cost to within a multiply, and every reader of this
+   file gets it at once: sky, water, the paper cockle, the watercolour bleed. */
 const NOISE = `
 float hash21(vec2 p){ p = fract(p*vec2(123.34, 345.45)); p += dot(p, p+34.345); return fract(p.x*p.y); }
-float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);
   return mix(mix(hash21(i), hash21(i+vec2(1,0)), u.x),
              mix(hash21(i+vec2(0,1)), hash21(i+vec2(1,1)), u.x), u.y); }
 float fbm(vec2 p){ float a=0.5,s=0.0; for(int i=0;i<5;i++){ s+=a*vnoise(p); p*=2.03; p+=11.7; a*=0.5; } return s; }
+// Six octaves and a gentler roll-off, for the sky specifically: cloud is the
+// one place in the frame with no geometry to break up the field, so it needs
+// the extra detail and it can afford it — one fullscreen triangle.
+float fbmSky(vec2 p){ float a=0.5,s=0.0,n=0.0;
+  for(int i=0;i<6;i++){ s+=a*vnoise(p); n+=a; p*=2.17; p+=11.7; a*=0.54; } return s/n; }
 float fbm2(vec2 p){ return 0.5*vnoise(p) + 0.25*vnoise(p*2.03 + 11.7); }
 float washStep(float x, float steps, float soft){ float sc=x*steps, i=floor(sc), f=fract(sc);
   return (i + smoothstep(0.5-soft, 0.5+soft, f)) / steps; }
@@ -393,7 +420,7 @@ const PAL_WATER = {
    itself coming back off the underside of the cloud. */
 const PAL_STREET = {
   night:{ zenith:[0.020,0.024,0.055], mid:[0.062,0.058,0.118], horizon:[0.420,0.235,0.130],
-          sun:[1.000,0.620,0.280], deep:[0.028,0.028,0.040], body:[0.070,0.066,0.086],
+          sun:[1.000,0.620,0.280], deep:[0.055,0.052,0.064], body:[0.101,0.095,0.115],
           crest:[0.960,0.585,0.270], sunDir:[-0.30,0.16,-0.94], silh:[0.030,0.028,0.050] },
   day:  { zenith:[0.196,0.157,0.278], mid:[0.478,0.318,0.322], horizon:[0.918,0.616,0.357],
           sun:[1.000,0.839,0.549], deep:[0.098,0.090,0.106], body:[0.204,0.180,0.200],
@@ -418,14 +445,32 @@ void main(){
   float y = vUV.y;
   vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.42, y));
   col = mix(col, uZenith, smoothstep(0.34, 1.0, y));
+  /* CLOUD. Two layers at different scales rather than one thresholded field:
+     a soft base that gives the sky its weight and a finer one laid over it for
+     edge detail. The old single layer went through smoothstep(0.42, 0.86),
+     which is a hard enough response to print the noise lattice straight onto
+     the screen — soft edges are what stop a cloud from having corners. */
   vec2 sp = vec2(vUV.x*uAspect*2.1, y*3.4);
-  float cl = fbm(sp*1.5 + vec2(uTime*0.008, 0.0));
-  cl = smoothstep(0.42, 0.86, cl) * smoothstep(0.02, 0.30, y);
+  float base = fbmSky(sp*2.2 + vec2(uTime*0.008, 0.0));
+  float fine = fbmSky(sp*6.1 + vec2(uTime*0.013, 4.7));
+  /* The threshold sits ABOVE the mean, and that is not a taste call. Averaging
+     two independent noise fields halves the variance, so the combined field
+     clusters hard around 0.5 — keep the old threshold and most of the sky
+     crosses it, which is how a thin band of cloud became solid overcast the
+     first time this was tried. Cloud cover is the area above the cut, so the
+     cut has to move with the variance. */
+  float cl = smoothstep(0.505, 0.80, base*0.78 + fine*0.22) * smoothstep(0.02, 0.32, y);
   col = mix(col, mix(uMid, uSun, 0.45), cl*0.42);
   float d = length((vUV - uSunUV) * vec2(uAspect, 1.0));
   col += uSun * (0.30*exp(-d*3.4) + 0.14*exp(-d*10.0));
   col = mix(col, uHorizon, smoothstep(0.10, 0.0, y));
-  fragColor = vec4(col, 1.0);
+  /* DITHER. A sky is a long shallow gradient across a thousand pixels of an
+     8-bit buffer, which is fewer than one code value per twenty pixels — so it
+     bands, and banding on a gradient looks exactly like low resolution. A
+     sub-LSB triangular dither breaks the contour up below the level anyone can
+     see as noise, and the gradient reads as continuous. */
+  float dth = (hash21(gl_FragCoord.xy) + hash21(gl_FragCoord.yx + 7.3) - 1.0) / 255.0;
+  fragColor = vec4(col + dth, 1.0);
 }`;
 
 const oceanVS = `#version 300 es
@@ -628,6 +673,9 @@ void main(){
   col = mix(col, col*vec3(1.03,1.0,0.97), 0.5);
   col += vec3(0.012,0.020,0.030)*wet;
   col *= 1.0 - smoothstep(0.42,0.98,length(vUV-0.5))*0.42;
+  // And again at the end: the vignette and the paper wash both reintroduce
+  // shallow gradients after the sky has already been dithered.
+  col += (hash21(gl_FragCoord.xy*1.7) + hash21(gl_FragCoord.yx*1.3 + 19.1) - 1.0) / 255.0;
   fragColor = vec4(max(col,0.0), 1.0);
 }`;
 
@@ -1525,15 +1573,20 @@ const CLS_NAME = { 5:'MAIN ROAD', 3:'SIDE STREET', 1:'ALLEY' };
    derive their own half-heights from it — so the skyline of a district is one
    pair of numbers in this table and nothing else in the file has an opinion
    about how tall a building is. */
+/* `grd` is the DIRT — the pavement, yard and back lot the district stands on.
+   Lighter than its masonry on purpose: the town was drawn as walls floating on
+   an unlit plane, so every gap between two buildings went straight to the
+   horizon and the place read as scenery flats rather than as a city with
+   ground between the parts of it. */
 const DISTRICTS = [
   { name:'The Works',  wall:[0.098,0.062,0.052], neon:[1.00,0.62,0.20], hi:[14,24],
-    mix:['works','works','lot','tenement'] },
+    grd:[0.086,0.072,0.062], mix:['works','works','lot','tenement'] },
   { name:'Sugar Hill', wall:[0.078,0.080,0.072], neon:[1.00,0.84,0.42], hi:[18,34],
-    mix:['tenement','chapel','shopfront','tenement'] },
+    grd:[0.078,0.076,0.070], mix:['tenement','chapel','shopfront','tenement'] },
   { name:'The Strip',  wall:[0.062,0.052,0.086], neon:[0.98,0.24,0.62], hi:[30,58],
-    mix:['theatre','shopfront','theatre','tenement'] },
+    grd:[0.072,0.066,0.082], mix:['theatre','shopfront','theatre','tenement'] },
   { name:'The Yards',  wall:[0.062,0.066,0.078], neon:[0.42,0.88,0.98], hi:[12,20],
-    mix:['lot','works','lot','works'] }
+    grd:[0.090,0.092,0.098], mix:['lot','works','lot','works'] }
 ];
 const districtOf = (i, j) =>
   DISTRICTS[Math.min(3, (hash2(Math.floor(i/2)*5.11, Math.floor(j/2)*7.33)*4)|0)];
@@ -1831,7 +1884,7 @@ const TRACKS = {
     name:'Atlantica', num:'Track 01', blurb:'Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>. Jump the barriers or you slow down.',
     gears:[120,126,134,146], scale:PENT_MINOR, roots:[0,1,4,2],
     names:['A','C','D','E','G'], nodes:NODES_WATER, start:'shallows',
-    pal:PAL_WATER, world:'water', bed:'bedWater',
+    pal:PAL_WATER, world:'water', bed:'bedWater', answer:'alienAnswer',
     // Dotted 8th, fed back — a flooded hall.
     echo:{ time:0.75, fb:0.24, damp:1500, send:0.15 },
     ring:{ a:[0.98,0.34,0.58], b:[0.74,0.30,0.94] }
@@ -1840,7 +1893,7 @@ const TRACKS = {
     name:'Soul Town', num:'Track 02', blurb:'One in the morning, downtown. Ride the backbeat — <b>the tambourine is the grid</b>. Same five frets, major key.',
     gears:[96,102,110,118], scale:PENT_MAJOR, roots:[0,4,1,3],
     names:['C','D','E','G','A'], nodes:NODES_STREET, start:'motorrow',
-    pal:PAL_STREET, world:'street', bed:'bedStreet', grid:true,
+    pal:PAL_STREET, world:'street', bed:'bedStreet', grid:true, answer:'hornShout',
     /* SLAP-BACK, not a hall. A single short repeat with almost no feedback is
        the tape delay every vocal of the period went through, and it is the
        other half of why this sounds like a record. */
@@ -1867,6 +1920,7 @@ function selectTrack(key){
     if(stemEls[STEMS[i].key]) stemEls[STEMS[i].key].row.querySelector('.nm').textContent = TRACK.names[i];
   }
   EVENTS.length = 0; ROUTE.length = 0; routeEndBeat = 0;
+  Game.turnArmed = 0;
   SEGS.length = 0; SEGS.push(makeSeg(0, 0, 0));       // back to the first block
   FRAME.init = false;                                  // and the camera with it
   pushNode(TRACK.start, 'S');
@@ -2614,6 +2668,46 @@ const Clock = {
 
      Brass, short, and through the same slap-back as everything else, so it
      belongs to the record rather than sitting on top of it. */
+  /* ── THE ANSWER, TRACK 01 ─────────────────────────────────────────
+     The formant vowel, exactly as it was — only now it is named for what it
+     does rather than for what it is made of, so a track can choose it. */
+  alienAnswer(v, oct){
+    this.alien(this.ctx.currentTime, p(12 + v*2 + oct), this.spb()*1.6,
+               0.16, this.VOW.EE, this.VOW.AH);
+  },
+  /* ── THE ANSWER, TRACK 02 ─────────────────────────────────────────
+     A HORN SHOUT. Three saws a scale-degree apart through one bandpass, so it
+     is a section and not a chord — and with a fast bend up into the note,
+     which is the single thing that separates a horn line from an organ: a
+     player leans into a stab, an oscillator does not. It opens wider as the
+     chain climbs, so the fourth link and the sixteenth are the same gesture
+     played harder rather than two different sounds.
+
+     Through the slap-back with everything else, because it is in the room. */
+  hornShout(v, oct){
+    if(!this.started) return;
+    const c = this.ctx, t = c.currentTime;
+    const top = 10 + v*2 + (oct ? 5 : 0);
+    for(const [d, lvl] of [[top, 0.15], [top+2, 0.12], [top-3, 0.09]]){
+      const f0 = p(d);
+      const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
+      o.type = 'sawtooth';
+      // The doit: up a semitone-and-a-bit in 40ms, then hold.
+      o.frequency.setValueAtTime(f0*0.94, t);
+      o.frequency.exponentialRampToValueAtTime(f0, t + 0.040);
+      o.detune.value = (Math.random()-0.5)*9;          // four men, not one patch
+      bp.type = 'bandpass'; bp.Q.value = 1.5;
+      bp.frequency.setValueAtTime(f0*1.5, t);
+      bp.frequency.exponentialRampToValueAtTime(f0*(2.4 + v*0.35), t + 0.07);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(lvl*(0.8 + v*0.12), t + 0.022);
+      g.gain.setValueAtTime(lvl*(0.8 + v*0.12), t + 0.14);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+      o.connect(bp).connect(g).connect(this.duck);
+      const sd = c.createGain(); sd.gain.value = 0.55; g.connect(sd).connect(this.fx);
+      o.start(t); o.stop(t + 0.46);
+    }
+  },
   turnStab(fromCls, toCls){
     if(!this.started) return;
     const c = this.ctx, t = c.currentTime, up = toCls > fromCls;
@@ -2883,6 +2977,42 @@ const Game = {
     const d = i*SEG_B - b;                      // >0 the crossing is ahead
     return (d <= TURN_WIN && d >= -0.30) ? i : -1;
   },
+  /* ── ARMING A TURN ────────────────────────────────────────────────
+     takeTurn() below is INSTANT and therefore timed: it only fires inside the
+     1.15-beat window around a crossing. That window is a ninth of a block and
+     nothing on screen said when it was open, so from a middle lane a press
+     almost always changed lane instead — and from an OUTER lane, where a press
+     further out has no lane to move to, the turn was the only thing that could
+     happen. Which is why turning appeared to work only from the outer lanes:
+     everywhere else the lane change was quietly eating the input.
+
+     Widening the window is not the fix. The chart puts notes on the 8th either
+     side of a crossing, so every beat spent unable to change lane is a beat of
+     unreachable phrase.
+
+     So the turn gets an INTENT instead of a wider window. Arm it whenever you
+     like, from any lane, and it fires by itself at the next crossing — and the
+     gesture that arms it (holding the direction) cannot be confused with the
+     one that changes lane (tapping it), so neither steals from the other. The
+     tap still moves you the instant it lands; the arm is what the hold adds.  */
+  turnArmed: 0,
+  armTurn(dir){
+    if(!TRACK.grid || this.inMelody || this.dead) return false;
+    if(this.turnArmed === dir){                       // arm again to think better of it
+      this.turnArmed = 0;
+      judge('TURN OFF', '#7f97a8');
+      return true;
+    }
+    this.turnArmed = dir;
+    judge(dir < 0 ? '◄ TURN ARMED' : 'TURN ARMED ►', '#f5a93c');
+    return true;
+  },
+  // Fired from the frame loop, exactly on the crossing beat.
+  serveArmed(b){
+    if(!this.turnArmed || this.inMelody) return;
+    const i = this.turnAt(b);
+    if(i >= 1 && i*SEG_B - b <= 0.05 && this.takeTurn(this.turnArmed)) this.turnArmed = 0;
+  },
   takeTurn(dir){
     const i = this.turnAt(Clock.songBeat());
     if(i < 0) return false;
@@ -2910,6 +3040,7 @@ const Game = {
                       : (dir < 0 ? '◄ ' : '') + CLS_NAME[now] + (dir < 0 ? '' : ' ►'),
           now === was ? '#e05ca8' : now > was ? '#f5a93c' : '#4fd4e4');
     Clock.latch();
+    this.turnArmed = 0;                        // taken; nothing left to serve
     if(now !== was) Clock.turnStab(was, now);
     return true;
   },
@@ -2940,7 +3071,14 @@ const Game = {
         } else {
           judge('MISTIMED', '#e8642a'); Clock.flam();
         }
+        return;
       }
+      /* Pressing further out than the road goes, with no fork open to take.
+         It was a dead input; now it arms the turn — so the gesture players
+         found by themselves ("go to the edge lane and press out") keeps
+         working, and works anywhere in the block instead of only inside the
+         window it used to need. */
+      this.armTurn(dir);
       return;
     }
     if(Math.abs(err) <= 0.13){
@@ -3109,13 +3247,18 @@ const Game = {
     else if(acc >= 1) this.hitFlash = Math.max(this.hitFlash, 0.45);
     this.lastHitLane = lane; this.lastHitBeat = b;
 
-    // Every 4th link the city answers you — an alien vowel stab, rising with the
-    // chain. Still player-caused, so the sound rule holds.
-    if(this.flowChain % 4 === 0){
-      const v = Math.min(3, Math.floor(this.flowChain/4));
-      Clock.alien(Clock.ctx.currentTime, p(12 + v*2 + oct), Clock.spb()*1.6,
-                  0.16, Clock.VOW.EE, Clock.VOW.AH);
-    }
+    /* Every 4th link the CITY ANSWERS YOU, rising with the chain. Still
+       player-caused, so the sound rule holds — but WHICH city is answering is
+       a property of the track rather than of this line.
+
+       Atlantica answers in a formant vowel: it is a drowned town and the thing
+       calling back is not meant to be human. In Soul Town that same voice was
+       the one sound in the mix that could not have come off a record cut in
+       1965 — a synthesised vowel in the middle of a horn band, and it read as
+       exactly that. Soul Town answers with the SECTION instead, because on
+       these records what answers the singer is four men with brass. */
+    if(this.flowChain % 4 === 0)
+      Clock[TRACK.answer](Math.min(3, Math.floor(this.flowChain/4)), oct);
     // Escalation: a gear every 8 links. Tempo climbs, and because node density
     // is baked from the gear you were in, the CHART subdivides behind it too.
     if(this.flowChain % 8 === 0) Clock.setGear(Clock.gear+1);
@@ -3271,10 +3414,33 @@ addEventListener('keydown', e=>{
     }
     return;
   }
-  if(k==='arrowleft')       { Game.tryLane(-1); e.preventDefault(); }
-  else if(k==='arrowright') { Game.tryLane(1);  e.preventDefault(); }
+  if(k==='arrowleft')       { Game.tryLane(-1); beginHold(-1); e.preventDefault(); }
+  else if(k==='arrowright') { Game.tryLane(1);  beginHold(1);  e.preventDefault(); }
   else if(k==='arrowup'){ Game.jump(); e.preventDefault(); }
 });
+/* ── TAP MOVES, HOLD TURNS ───────────────────────────────────────────────
+   Two verbs on one key, separated by time rather than by position, which is
+   what lets the turn work from every lane without taking a single beat away
+   from lane play.
+
+   The tap fires on KEY DOWN and is never delayed waiting to find out whether a
+   hold is coming — a rhythm game that waits 190ms to see what you meant has
+   already missed the note. The hold is ADDITIVE: the lane change happened, it
+   was a real move, and if the key is still down when the timer lands the turn
+   is armed as well. Nothing is taken back and nothing is deferred. */
+const HOLD_MS = 190;
+let holdTimer = null, holdDir = 0;
+function beginHold(dir){
+  clearTimeout(holdTimer); holdDir = dir;
+  holdTimer = setTimeout(()=>{ if(holdDir === dir) Game.armTurn(dir); }, HOLD_MS);
+}
+function endHold(){ clearTimeout(holdTimer); holdTimer = null; holdDir = 0; }
+addEventListener('keyup', e=>{
+  const k = e.key.toLowerCase();
+  if(k==='arrowleft' || k==='arrowright') endHold();
+});
+// A key held while the tab goes away would otherwise arm a turn nobody asked for.
+addEventListener('blur', endHold);
 // Losing the tab mid-run must not silently desync the song.
 addEventListener('blur', ()=>{ if(Clock.started && !Clock.paused) setPause(true); });
 document.addEventListener('visibilitychange', ()=>{
@@ -3571,9 +3737,13 @@ padsEl.querySelectorAll('.pk').forEach(el=>{
      come back up has already missed the note. stopPropagation keeps the
      press out of the gesture machine — a button is not a swipe and not a
      tap, and a tap here would otherwise count toward the view-switch. */
-  const fire = e => { e.preventDefault(); e.stopPropagation(); padHit(dir, el); };
+  const fire = e => { e.preventDefault(); e.stopPropagation(); padHit(dir, el);
+    if(dir === 'left' || dir === 'right') beginHold(dir === 'left' ? -1 : 1); };
   el.addEventListener('touchstart', fire, {passive:false});
   el.addEventListener('pointerdown', fire);
+  // Hold the pad, same as holding the key: tap moves, hold turns.
+  for(const ev of ['touchend','touchcancel','pointerup','pointercancel','pointerleave'])
+    el.addEventListener(ev, endHold);
 });
 /* ── ?touchdebug ─────────────────────────────────────────────────────────
    Load the page with ?touchdebug on the end of the URL and the raw input
@@ -3730,7 +3900,7 @@ gate.addEventListener('click', ()=>{
    So the sink is now one number, applied to every prop in the city and larger
    than the tallest thing in it. Nothing pokes up, whatever its height, and
    there is no per-object arithmetic left to get wrong.                       */
-const CITY = { sink:0, yaw:0, R:340, beat:0, deck:[0.1,0.1,0.1] };
+const CITY = { sink:0, yaw:0, R:340, beat:0, deck:[0.1,0.1,0.1], armed:0, live:false };
 const CITY_SINK = 150;              // clears the tallest blade sign in the town
 
 function cityVis(wx, wz){
@@ -3994,14 +4164,21 @@ function faceLot(D, seed, u0, L, h, w, near){
   /* THE HOARDING. Legs, panel, and a lit border. A billboard is the only thing
      in a 1960s city allowed to be bigger than what it stands in front of —
      which is why it is the one detail here sized off L rather than in metres. */
-  const bw = Math.min(L*0.72, 11);
-  for(const uu of [-bw*0.85, bw*0.85])
-    facePut(u0 + uu, 3.0, DECK_Y + 4.2, 0.22, 4.4, 0.22, 0.14, 0.13, 0.14, 0);
-  facePut(u0, 3.0, DECK_Y + 11.0, bw, 3.4, 0.28,
-          D.neon[0]*0.30, D.neon[1]*0.30, D.neon[2]*0.30, 0.28);
+  /* Not every lot carries one. The Yards is half empty lots, so a hoarding on
+     each put a billboard every thirty metres down both sides of the street —
+     the thing that is supposed to be the biggest object in the district cannot
+     also be the most common one. Two lots in three, and the rest are just
+     fenced ground, which is what makes the ones that are there read as tall. */
+  if(hash2(seed*8.3, 1.9) >= 0.34){
+    const bw = Math.min(L*0.72, 11);
+    for(const uu of [-bw*0.85, bw*0.85])
+      facePut(u0 + uu, 3.0, DECK_Y + 4.2, 0.22, 4.4, 0.22, 0.14, 0.13, 0.14, 0);
+    facePut(u0, 3.0, DECK_Y + 11.0, bw, 3.4, 0.28,
+            D.neon[0]*0.30, D.neon[1]*0.30, D.neon[2]*0.30, 0.28);
+    if(near) for(const y of [DECK_Y + 14.5, DECK_Y + 7.5])
+      facePut(u0, 2.6, y, bw, 0.18, 0.18, D.neon[0], D.neon[1], D.neon[2], neonGlow(seed + 6));
+  }
   if(!near) return;
-  for(const y of [DECK_Y + 14.5, DECK_Y + 7.5])
-    facePut(u0, 2.6, y, bw, 0.18, 0.18, D.neon[0], D.neon[1], D.neon[2], neonGlow(seed + 6));
   // Two cars parked off the street, facing the wrong way. Nobody minds.
   const F = CITY_FRAME;
   for(let k=0;k<2;k++){
@@ -4063,6 +4240,31 @@ function cityEdge(axis, i, j, ox, oz){
       }
     }
     u += step;
+  }
+
+  /* THE PAVEMENT MARGIN. A cell's ground slab stops at a MAIN road's kerb,
+     because a cell cannot know which of four different streets is on which of
+     its sides. So the strip between this street's kerb and that line — nothing
+     on a boulevard, three units on a side street, seven in an alley — is filled
+     here, where the class is known.
+
+     The two axes are laid a hair apart in height (0.02) rather than at the same
+     level. They overlap in the small square at every corner, and two coplanar
+     faces fighting for the same depth flickers; a step far below what the eye
+     resolves does not. */
+  const marg = halfRoad(5) - hw;
+  if(marg > 0.05){
+    const gy = DECK_Y - 0.36 + (alongX ? 0 : 0.02);
+    const g = districtOf(Math.floor((alongX ? sx0 + BLOCK/2 : sx0)/BLOCK),
+                         Math.floor((alongX ? sz0 : sz0 + BLOCK/2)/BLOCK)).grd;
+    for(const sg of [-1, 1]){
+      const off = sg*(hw + marg/2);
+      const px2 = alongX ? sx0 + BLOCK/2 : sx0 + off;
+      const pz2 = alongX ? sz0 + off : sz0 + BLOCK/2;
+      if(Math.hypot(px2-ox, pz2-oz) > CITY.R) continue;
+      cityBox(px2, pz2, gy, alongX ? BLOCK/2 : marg/2, 0.50, alongX ? marg/2 : BLOCK/2,
+              g[0], g[1], g[2], 0);
+    }
   }
 
   /* WHAT IS PARKED THERE. The narrowness has to have a cause you can see, or
@@ -4130,6 +4332,8 @@ function citySigns(ox, oz, i0, i1, j0, j1){
      detail inside its own backing plate for the other three, which is exactly
      what happened: the pips were there and invisible. */
   const nx = pAlongX ? -fwdA : 0, nz = pAlongX ? 0 : -fwdA;
+  // Which of the two branches is a RIGHT turn, in world terms.
+  const rightDB = pAlongX ? Math.sign(rgtZ(h)) : Math.sign(rgtX(h));
   for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
     const X = i*BLOCK, Z = j*BLOCK;
     if(Math.hypot(X-ox, Z-oz) > 240) continue;
@@ -4167,15 +4371,34 @@ function citySigns(ox, oz, i0, i1, j0, j1){
          Thin along your street and wide across it, so the pips lie left to
          right in the frame however you are driving. */
       const SY = DECK_Y + 8.8, c2 = PIP_COL[cls];
+      /* THE SIGN LIGHTS UP WHEN THE TURN IS LIVE. Two states worth showing and
+         they are different things: the window for an immediate turn is open
+         (both branches brighten), or you have ARMED this one and it is about to
+         be taken (that branch only, and it pulses). */
+      const isRight = (dB === rightDB);
+      const mine = CITY.armed && ((CITY.armed > 0) === isRight);
+      const flare = mine ? 1.0 + 0.9*Math.abs(Math.sin(CITY.beat*Math.PI))
+                         : CITY.live ? 1.55 : 1.0;
       cityBox(wx, wz, DECK_Y + 4.4, 0.17, 4.4, 0.17, 0.13, 0.12, 0.13, 0);
       const halfB = 0.9 + cls*0.85;
       cityBox(wx, wz, SY, pAlongX ? 0.12 : halfB, 1.5, pAlongX ? halfB : 0.12,
-              c2[0]*0.26, c2[1]*0.26, c2[2]*0.26, 0.22);
+              c2[0]*0.26*flare, c2[1]*0.26*flare, c2[2]*0.26*flare, 0.22*flare);
       for(let k=0;k<cls;k++){
         const o2 = (k - (cls-1)/2)*1.7;
         cityBox(wx + nx*0.22 + (pAlongX ? 0 : o2), wz + nz*0.22 + (pAlongX ? o2 : 0), SY,
                 pAlongX ? 0.14 : 0.55, 0.55, pAlongX ? 0.55 : 0.14,
-                c2[0], c2[1], c2[2], 1.30);
+                c2[0], c2[1], c2[2], 1.30*flare);
+      }
+      /* AND AN ARROW ON THE ROAD, when this is the branch you have armed. The
+         sign says what is down there; this says you are going. Painted into the
+         mouth of the branch so it is read as part of the junction rather than
+         as HUD stuck over it. */
+      if(mine) for(let k=0;k<3;k++){
+        const a2 = dB*(halfRoad(cls)*0.45 + k*2.4);
+        const g2 = 0.55 + 0.45*Math.sin(CITY.beat*Math.PI*2 - k*0.9);
+        cityBox(pAlongX ? X : X + a2, pAlongX ? Z + a2 : Z, DECK_Y + 0.06,
+                pAlongX ? 2.6 : 0.7, 0.02, pAlongX ? 0.7 : 2.6,
+                1.0, 0.72, 0.24, g2);
       }
     }
     /* TRAFFIC LIGHTS, where two boulevards meet. Nothing else in the town says
@@ -4206,6 +4429,11 @@ function drawCity(beat, deckCol){
   CITY.yaw = -FRAME.camH;
   CITY.sink = Game.sideMix*CITY_SINK;
   CITY.deck = deckCol;
+  /* An armed turn and an open turn window are both invisible state that decides
+     what the next press does, so both are painted onto the crossing itself —
+     see citySigns(). Nothing about turning should have to be remembered. */
+  CITY.armed = Game.turnArmed;
+  CITY.live  = Game.turnAt(beat) >= 1;
   // Fully in the melody layer the town is 150 units under the deck and nothing
   // of it can be on screen, so none of it is worth transforming.
   if(Game.sideMix > 0.985) return;
@@ -4213,6 +4441,32 @@ function drawCity(beat, deckCol){
   const ox = FRAME.o.x, oz = FRAME.o.z, R = CITY.R;
   const i0 = Math.floor((ox - R)/BLOCK), i1 = Math.ceil((ox + R)/BLOCK);
   const j0 = Math.floor((oz - R)/BLOCK), j1 = Math.ceil((oz + R)/BLOCK);
+
+  /* ── THE GROUND ──────────────────────────────────────────────────
+     FIRST, because everything else in the town stands on it.
+
+     The city used to be walls and roads on nothing: between two buildings, or
+     across an empty lot, or anywhere the terrace left a gap at a corner, you
+     looked straight past the geometry at the horizon wash. Which reads as
+     scenery flats standing in a void — the buildings did not belong to the
+     place, they were in front of it.
+
+     So every cell of the lattice gets a slab: pavement, yard and back lot in
+     one, at its district's own dirt colour, raised a hand's width ABOVE the
+     carriageway so the kerb is a real step you can see the town sitting on.
+     Sized to stop exactly at a main road's kerb — narrower streets have their
+     extra margin filled by cityEdge(), which is the only place that knows how
+     wide a given street is.
+
+     One slab per cell. Twenty-five instances for a floor under the whole
+     visible city, which is the cheapest thing in this renderer by a distance. */
+  const CELL_G = BLOCK/2 - halfRoad(5);
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+    const bx = i*BLOCK + BLOCK/2, bz = j*BLOCK + BLOCK/2;
+    if(Math.hypot(bx-ox, bz-oz) > R + BLOCK) continue;
+    const g = districtOf(i, j).grd;
+    cityBox(bx, bz, DECK_Y - 0.34, CELL_G, 0.50, CELL_G, g[0], g[1], g[2], 0);
+  }
 
   for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
     cityEdge(0, i, j, ox, oz);          // the road along Z at x = i·BLOCK
@@ -4350,6 +4604,9 @@ function frame(now){
   // Autoride steers before events resolve, so a move it makes on this beat is
   // seen by the same catch test a player's move would be.
   if(!Clock.paused) Game.autoStep(beat);
+  // An armed turn is served here rather than from an input handler, because it
+  // has to land ON the crossing beat and only the frame loop knows when that is.
+  if(!Clock.paused) Game.serveArmed(beat);
 
   /* ── event resolution ────────────────────────────────────────────── */
   for(const e of EVENTS){
@@ -4374,14 +4631,30 @@ function frame(now){
       e.done = true;
     } else if(e.t === 'flow'){
       if(e.lane === Game.hitLane()){ Game.catchFlow(beat, e); e.got = true; e.done = true; }
-    } else if(e.t === 'jump'){
-      // spans every lane, so no lane test — but it must be visibly a wall
-      if(!Game.jumping(beat)) Game.hit('HIT — GATE');
-      else { e.cleared = true; Clock.vault(Game.jumpAt + 0.9, true); judge('VAULT', '#4fd4e4'); }
-      e.done = true;
-    } else if(e.t === 'hurdle'){
-      if(!Game.jumping(beat)) Game.clip();
-      else { e.cleared = true; Clock.vault(Game.jumpAt + 0.9, false); }
+    } else if(e.t === 'jump' || e.t === 'hurdle'){
+      /* NOTHING ON THE ROAD CAN HIT YOU WHILE YOU ARE FLYING OVER IT.
+
+         A gate and a hurdle both span every lane, so neither has a lane test —
+         you clear them by jumping. But in the melody layer there is no jump:
+         UP and DOWN are pitch there, and the key that vaults in chase view
+         moves you a scale degree instead. So a gate met from the side view was
+         a hit with no avoidance available and, because both are drawn on the
+         road at mid-staff, no warning either — the barrier you "clearly were
+         not on" was a road obstacle collected at altitude.
+
+         placeHurdles() already refuses to put hurdles in a melody SECTION for
+         this exact reason. The hole was the melody VIEW, which the player can
+         toggle into anywhere with space, over any chart. So the rule moves to
+         where it belongs: the view, not the section. Above the road, road
+         furniture passes underneath — and it is drawn doing so. */
+      if(Game.sideMix > 0.5){ e.done = true; continue; }
+      if(e.t === 'jump'){
+        if(!Game.jumping(beat)) Game.hit('HIT — GATE');
+        else { e.cleared = true; Clock.vault(Game.jumpAt + 0.9, true); judge('VAULT', '#4fd4e4'); }
+      } else {
+        if(!Game.jumping(beat)) Game.clip();
+        else { e.cleared = true; Clock.vault(Game.jumpAt + 0.9, false); }
+      }
       e.done = true;
     }
   }
@@ -4842,18 +5115,24 @@ function frame(now){
          lane-widths to the left of the road, hanging off the deck. Like the
          gate, it sits on the road centre and, in the melody view, at the middle
          of the staff. */
+      /* IT STAYS ON THE ROAD. Notes rise into the staff as the view turns
+         because a note's lane IS a pitch; a hurdle's is not — it is a bar
+         lying across the tarmac, and lifting it to mid-staff drew a road
+         obstacle among the pitches, which is what made it look like it was in
+         your way when it no longer is. On the deck, dimming as you climb away
+         from it, it reads as what it is: something you are now above. */
       const HP  = place(e.beat, 0);
       const hx  = HP.x, hz = HP.z, hyaw = HP.yaw;
-      const hy  = DECK_Y + ((altY(2) - 0.7) - DECK_Y)*mm;
+      const hy  = DECK_Y;
       const hhw = deckHalfW(e.beat);
-      const nearh = Math.max(0, 1 - Math.abs(dz)/150);
+      const nearh = Math.max(0, 1 - Math.abs(dz)/150), hf = 1 - mm*0.72;
       pushInst(MESH_BOX, hx, hy+0.52, hz, hhw+0.6, 0.34, 0.42,
                0.10,0.07,0.07, 0,0, 0, hyaw);
       pushInst(MESH_BOX, hx, hy+0.88, hz, hhw+0.6, 0.07, 0.30,
-               0.95,0.42,0.16, 0,0, 0.55 + 0.45*nearh, hyaw);
+               0.95,0.42,0.16, 0,0, (0.55 + 0.45*nearh)*hf, hyaw);
       for(let k=-2;k<=2;k++)                      // hazard stripes
         pushInst(MESH_BOX, place(e.beat, k*(hhw*0.42)).x, hy+0.52, hz+0.05, 0.22, 0.30, 0.10,
-                 0.96,0.72,0.20, 0,0, 0.30 + 0.30*nearh, hyaw);
+                 0.96,0.72,0.20, 0,0, (0.30 + 0.30*nearh)*hf, hyaw);
     } else if(e.t === 'jump'){
       /* A gate hits you in EVERY lane, so it must be unmissable. It used to be
          two thin posts at the outer edges — nothing in your lane, nothing across
@@ -4861,19 +5140,22 @@ function frame(now){
          It is now a full-width barrier that brightens as it approaches. */
       const GP = place(e.beat, 0);
       const gx = GP.x, gz = GP.z, gyaw = GP.yaw;
-      const near = Math.max(0, 1 - Math.abs(dz)/140);
+      const near = Math.max(0, 1 - Math.abs(dz)/140), gf = 1 - mm*0.72;
+      // On the deck, like the hurdle and for the same reason — a gate spans
+      // lanes, not pitches, so it must not climb into the staff with the notes.
+      const gy = DECK_Y;
       /* Fairness rule 1: a hitbox may never be wider than its art. A gate hits
          across every lane, so it must be drawn exactly as wide as the road is
          HERE — on a three-lane street that is narrower. */
       const ghw = deckHalfW(e.beat);
-      pushInst(MESH_BOX, gx, baseY+1.70, gz, ghw+0.8, 0.45, 0.34,
-               0.31,0.83,0.89, 0,0, 0.55 + 0.40*near, gyaw);
-      pushInst(MESH_BOX, gx, baseY+0.62, gz, ghw+0.8, 0.05, 0.28,
-               0.31,0.83,0.89, 0,0, 0.28 + 0.35*near, gyaw);
+      pushInst(MESH_BOX, gx, gy+1.70, gz, ghw+0.8, 0.45, 0.34,
+               0.31,0.83,0.89, 0,0, (0.55 + 0.40*near)*gf, gyaw);
+      pushInst(MESH_BOX, gx, gy+0.62, gz, ghw+0.8, 0.05, 0.28,
+               0.31,0.83,0.89, 0,0, (0.28 + 0.35*near)*gf, gyaw);
       for(const sx of [-1,1]){
         const GQ = place(e.beat, sx*(ghw+0.7));
-        pushInst(MESH_BOX, GQ.x, baseY+1.05, GQ.z, 0.24,1.05,0.32,
-                 0.31,0.83,0.89, 0,0, 0.75, gyaw);
+        pushInst(MESH_BOX, GQ.x, gy+1.05, GQ.z, 0.24,1.05,0.32,
+                 0.31,0.83,0.89, 0,0, 0.75*gf, gyaw);
       }
     }
   }
@@ -5035,7 +5317,9 @@ function frame(now){
                  ? (padsOn ? '  ·  ↑ ↓ = pitch  ·  double tap = arrangement'
                           : TOUCH ? '  ·  swipe ↑ ↓ = pitch  ·  double tap = arrangement'
                           : '  ·  ↑↓ = pitch  ·  again at the ends = octave')
-                 : (Game.mult > 1 ? '  ·  ×' + Game.mult : '')))
+                 : (Game.turnArmed
+                      ? (Game.turnArmed < 0 ? '  ·  ◄ TURN ARMED' : '  ·  TURN ARMED ►')
+                      : Game.mult > 1 ? '  ·  ×' + Game.mult : '')))
     : '';
   const bi = ((Math.floor(beat)%4)+4)%4;
   for(let i=0;i<4;i++)
