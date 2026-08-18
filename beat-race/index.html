@@ -765,8 +765,15 @@ function hullGeo(){
     id.push(b,b+1,b+2); }
   return [p,n,id];
 }
-const MESH_BOX  = makeMesh(...boxGeo(),   2600);   // Soul Town's blocks and lamps live here too
-const MESH_SPH  = makeMesh(...sphereGeo(), 460);
+/* Raised for Soul Town. The city used to be slabs and lamps; it is now
+   facades, fire escapes, marquees, blade signs, hoardings, kerbside cars and
+   lane-count signs, all of it inside one instanced draw. Measured peak with
+   everything on screen is ~1600 boxes, so 4200 is headroom rather than a
+   budget — and pushInst() drops silently past its cap, which is the one
+   failure mode worth over-provisioning against because it looks like the city
+   half-existing rather than like an error. */
+const MESH_BOX  = makeMesh(...boxGeo(),   4200);   // Soul Town's blocks and lamps live here too
+const MESH_SPH  = makeMesh(...sphereGeo(), 900);
 const MESH_HULL = makeMesh(...hullGeo(),    12);
 const MESH_TOR  = makeMesh(...torusGeo(),   16);
 
@@ -1032,6 +1039,32 @@ const PATTERNS = {
     {s:0,  lane:2, a:2}, {s:4,  lane:1, a:1}, {s:8,  lane:2, a:2}, {s:12, lane:3, a:1},
     {s:16, lane:2, a:2}, {s:20, lane:1, a:1}, {s:24, lane:2, a:2}, {s:28, lane:3, a:1} ]},
 
+  /* THE OTHER SIDE STREET. Two figures for three lanes rather than one, chosen
+     by the block, because a city with one side street in it is a corridor with
+     a bend. Where soulAlley walks straight quarters, this one answers itself
+     across the bar — the same three frets, the opposite phrasing. */
+  soulSideB: { bars:2, span:[1,3], ev:[
+    {s:0,  lane:1, a:2}, {s:6,  lane:2, a:1},
+    {s:8,  lane:3, a:2}, {s:12, lane:2, a:1}, {s:14, lane:1, a:1},
+    {s:16, lane:1, a:2}, {s:22, lane:2, a:1},
+    {s:24, lane:3, a:2}, {s:28, lane:2, a:1}, {s:30, lane:1, a:1} ]},
+
+  /* THE ALLEY. One lane wide, so one fret — and the moment a chart has only
+     one pitch in it the interesting thing is no longer WHICH note but WHEN.
+     Deliberately sparse: every gap here is 1.5 beats, which is exactly what
+     placeHurdles() is looking for, so an alley fills itself with things to
+     jump without a single line of code saying "alleys have obstacles". The
+     narrow street IS the obstacle course, by construction.
+
+     Musically it is the break — the bar where a record like this drops to the
+     drums and one note of bass and everybody waits. Which is what an alley at
+     one in the morning sounds like. */
+  soulSingle: { bars:2, span:[2,2], ev:[
+    {s:0,  lane:2, a:2}, {s:6,  lane:2, a:1},
+    {s:8,  lane:2, a:2}, {s:14, lane:2, a:1},
+    {s:16, lane:2, a:2}, {s:22, lane:2, a:1},
+    {s:24, lane:2, a:2}, {s:30, lane:2, a:2} ]},
+
   // THE RISING — the melody layer. A gospel climb and a step back down.
   soulAscent: { bars:2, ev:[
     {s:0,  lane:0, a:2}, {s:4,  lane:1, a:1}, {s:8,  lane:2, a:1}, {s:12, lane:3, a:1},
@@ -1238,16 +1271,84 @@ function pushNode(key, choice){
   ROUTE.push(ent);
   routeEndBeat = ent.endBeat;
 
-  const pat = PATTERNS[n.pat];
-  const evs = densify(pat.ev, tier);
-  for(let rep=0; rep<n.bars/pat.bars; rep++)
-    for(const e of evs)
-      EVENTS.push({ beat: startBeat + rep*pat.bars*4 + e.s/4, lane:e.lane,
-                    t: e.t || 'flow', acc: e.a === undefined ? 1 : e.a,
-                    fill: !!e.fill, done:false });
-  placeHurdles(ent, startBeat, ent.endBeat);
+  if(grid){
+    // One city block at a time, because the street decides the figure.
+    for(let sg = Math.round(startBeat/SEG_B); sg*SEG_B < ent.endBeat; sg++) emitBlock(sg, -1e9);
+  } else {
+    const pat = PATTERNS[n.pat];
+    const evs = densify(pat.ev, tier);
+    for(let rep=0; rep<n.bars/pat.bars; rep++)
+      for(const e of evs)
+        EVENTS.push({ beat: startBeat + rep*pat.bars*4 + e.s/4, lane:e.lane,
+                      t: e.t || 'flow', acc: e.a === undefined ? 1 : e.a,
+                      fill: !!e.fill, done:false });
+    placeHurdles(ent, startBeat, ent.endBeat);
+  }
   EVENTS.push({ beat: ent.junctionBeat, lane:-1, t:'junction', done:false, committed:false, ent });
   return ent;
+}
+
+/* ══ ONE CITY BLOCK, ONE FIGURE ═══════════════════════════════════════
+   A pattern is two bars — eight beats. A city block is eight beats. That is
+   not a coincidence to be maintained by hand, it is the hinge the whole
+   feature turns on: because a block and a figure are the same length, the
+   STREET can choose the FIGURE, and the choice lands on a bar line.
+
+   So the chart on a grid track is emitted per block rather than per section,
+   and which figure a block gets is decided by its width:
+
+     5 lanes → the section's own phrase. Five frets, the full line.
+     3 lanes → a three-fret figure. Straight quarters, more space, and the
+               melody has to say more with less.
+     1 lane  → a one-fret vamp. There is nowhere to move sideways, so the
+               interest moves to the body: the rests fill with hurdles by
+               themselves, because placeHurdles() goes wherever the notes are
+               not and in an alley they are a beat and a half apart.
+
+   The SECTION still decides the harmony, the density tier and whether you are
+   flying. The STREET decides the shape of the line. Two authors, one chart. */
+const SIDE_PATS = ['soulAlley', 'soulSideB'];
+function patForBlock(ent, seg){
+  const node = NODES[ent.key];
+  // Flying: altitude is a pitch, so a narrow street cannot take frets away.
+  if(ent.kind === 'melody') return PATTERNS[node.pat];
+  const cls = ensureSeg(seg).cls;
+  if(cls >= 5) return PATTERNS[node.pat];
+  if(cls === 1) return PATTERNS.soulSingle;
+  return PATTERNS[SIDE_PATS[hash2(seg*3.71, 17.3) < 0.5 ? 0 : 1]];
+}
+/* Emit (or re-emit) the notes for one lattice block. `notBefore` protects the
+   past: a turn regrows the block you are standing in, and the notes of it you
+   have already played must not come back. */
+function emitBlock(seg, notBefore){
+  const from = seg*SEG_B;
+  const ent = routeAt(from + 0.001);
+  if(!ent || from < ent.startBeat - 0.001 || from >= ent.endBeat) return;
+  const pat = patForBlock(ent, seg);
+  const evs = densify(pat.ev, ent.tier);
+  const patB = pat.bars*4;
+  for(let at = from; at < from + SEG_B && at < ent.endBeat; at += patB)
+    for(const e of evs){
+      const bt = at + e.s/4;
+      if(bt < notBefore || bt >= ent.endBeat) continue;
+      EVENTS.push({ beat: bt, lane:e.lane, t: e.t || 'flow',
+                    acc: e.a === undefined ? 1 : e.a, fill: !!e.fill, done:false });
+    }
+  placeHurdles(ent, Math.max(from, notBefore), Math.min(from + SEG_B, ent.endBeat));
+}
+/* THE CHART FROM A CROSSING FORWARD. Called by takeTurn(), and deliberately
+   the same shape as the geometry regrow it sits next to: throw away everything
+   past the crossing that has not happened yet, and ask the city again. Cheap —
+   a block is a dozen events — and correct by construction, which a patch-up
+   would not be. */
+function regrowChart(fromSeg, now){
+  const from = fromSeg*SEG_B, keep = now + 0.05;
+  for(let k=EVENTS.length-1;k>=0;k--){
+    const e = EVENTS[k];
+    if(e.t === 'junction' || e.done) continue;
+    if(e.beat >= from && e.beat > keep) EVENTS.splice(k, 1);
+  }
+  for(let sg = fromSeg; sg*SEG_B < routeEndBeat; sg++) emitBlock(sg, keep);
 }
 // The first node is pushed by selectTrack(), once a track has been chosen.
 
@@ -1282,6 +1383,13 @@ function centerX(b){
    it, which is the whole read. Everything that needs a road width (deck, rails,
    legs, gates) derives from this, so none of them can disagree. */
 function laneCountAt(b){
+  /* ON A GRID TRACK THE STREET DECIDES, not the section. A node's `lanes` was
+     the only way to say "this bit is narrower" back when the route WAS the
+     road; now the road is a lattice of streets that each carry their own
+     class, and the musical section rides over the top of them. So Soul Town
+     asks the city and Atlantica still asks the chart — which is also why
+     NODES_STREET's `lanes:3` entries are now inert. */
+  if(TRACK.grid) return streetLanesAt(b);
   const i = routeIndexAt(b), e = ROUTE[i], nx = ROUTE[i+1];
   if(nx && b >= e.junctionBeat){
     const span = Math.max(1e-6, e.endBeat - e.junctionBeat);
@@ -1352,6 +1460,94 @@ const TURN_WIN = 0.85;   // beats either side of a crossing that a turn lands
 const fwdX = h => Math.sin(h), fwdZ = h => -Math.cos(h);
 const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
 
+/* ══ NOT EVERY STREET IS THE SAME STREET ══════════════════════════════
+   The lattice made the whole city visible at once, and then made every road
+   in it identical: same width, same lights, same buildings either side. Which
+   meant a turn was a free action with no consequence — left and right led to
+   the same place, drawn the same way, playing the same figure. A choice that
+   changes nothing is not a choice, it is a button.
+
+   So a street now has a CLASS, and the class is its width in lanes:
+
+     5  MAIN ROAD    the boulevard. Full band, full chart, five frets.
+     3  SIDE STREET  narrower, cars at both kerbs. Three frets, stripped band.
+     1  ALLEY        one lane between walls. One fret, and things to jump.
+
+   Two properties make this work as a decision rather than a lottery.
+
+   MAIN ROADS ARE WHOLE LINES. Every third line of the lattice is a main road
+   from one end of the city to the other, so the town has a spine you can find
+   again and get back onto — a boulevard that pinched to an alley halfway along
+   would be unnavigable and unmusical.
+
+   EVERYTHING ELSE IS PER EDGE. An edge is one block of one line, and it is
+   the edge, not the line, that carries the class. That is precisely what makes
+   LEFT differ from RIGHT: both turns at a crossing put you on the same LINE,
+   but on opposite EDGES of it, so one can be a three-lane street and the other
+   an alley. Without this the two turns would be indistinguishable by
+   construction, no matter how much detail was hung off them.
+
+   The class is a pure function of the lattice, like everything else here: the
+   city is the same city every time you come back to it, and nothing has to be
+   remembered or rebuilt.                                                     */
+const hash2 = (a2, b2) => { const x = Math.sin(a2*127.1 + b2*311.7)*43758.5453; return x - Math.floor(x); };
+// Every third line, in both directions, is a boulevard.
+const lineIsMain = k => ((k % 3) + 3) % 3 === 0;
+/* An edge of the lattice. axis 0 is a road along Z — the line is x = i·BLOCK
+   and j indexes the block it spans; axis 1 is a road along X, line z = j·BLOCK,
+   i indexes the block. One in three non-main edges pinches to an alley. */
+function edgeCls(axis, i, j){
+  if(lineIsMain(axis === 0 ? i : j)) return 5;
+  return hash2(axis*613.1 + i*7.31, j*11.77) < 0.34 ? 1 : 3;
+}
+// Which edge a segment IS. Taken from its MIDPOINT so that driving a street
+// north or south finds the same edge — a street is not two streets.
+function segCls(x, z, h){
+  const mx = x + fwdX(h)*BLOCK/2, mz = z + fwdZ(h)*BLOCK/2;
+  return Math.abs(fwdX(h)) > 0.5
+    ? edgeCls(1, Math.floor(mx/BLOCK), Math.round(mz/BLOCK))
+    : edgeCls(0, Math.round(mx/BLOCK), Math.floor(mz/BLOCK));
+}
+// Half the carriageway, for a class. The +0.9 is the kerb, and matches the deck.
+const halfRoad = cls => LANE_W*cls/2 + 0.9;
+const CLS_NAME = { 5:'MAIN ROAD', 3:'SIDE STREET', 1:'ALLEY' };
+
+/* THE DISTRICTS. Class says how WIDE a street is; a district says what stands
+   along it. Four of them, tiled over 2×2-block cells of the same lattice, so
+   the far end of a street looks different from the near end and driving toward
+   a skyline means something. This is the other half of "it makes a difference
+   which way you turn": the width is the choice you can hear, the district is
+   the choice you can see.
+
+   Each carries its own masonry, its own neon, and its own idea of what a
+   building is for — a works is not a theatre is not a chapel.               */
+/* `hi` is the ROOF HEIGHT above the deck, in world units, and the archetypes
+   derive their own half-heights from it — so the skyline of a district is one
+   pair of numbers in this table and nothing else in the file has an opinion
+   about how tall a building is. */
+const DISTRICTS = [
+  { name:'The Works',  wall:[0.098,0.062,0.052], neon:[1.00,0.62,0.20], hi:[14,24],
+    mix:['works','works','lot','tenement'] },
+  { name:'Sugar Hill', wall:[0.078,0.080,0.072], neon:[1.00,0.84,0.42], hi:[18,34],
+    mix:['tenement','chapel','shopfront','tenement'] },
+  { name:'The Strip',  wall:[0.062,0.052,0.086], neon:[0.98,0.24,0.62], hi:[30,58],
+    mix:['theatre','shopfront','theatre','tenement'] },
+  { name:'The Yards',  wall:[0.062,0.066,0.078], neon:[0.42,0.88,0.98], hi:[12,20],
+    mix:['lot','works','lot','works'] }
+];
+const districtOf = (i, j) =>
+  DISTRICTS[Math.min(3, (hash2(Math.floor(i/2)*5.11, Math.floor(j/2)*7.33)*4)|0)];
+// The district the player is standing in — read by the HUD only.
+const districtAtInto = o => districtOf(Math.round(o.x/BLOCK), Math.round(o.z/BLOCK));
+
+/* Mirrors TRACK.grid, for the same reason gearNow mirrors Clock.gear: SEGS[0]
+   is built at module scope, before `let TRACK` is initialised, and reading
+   TRACK there is a TDZ error. selectTrack() is the only writer. */
+let gridNow = false;
+function makeSeg(x, z, h){
+  return { x, z, h, cls: gridNow ? segCls(x, z, h) : LANES };
+}
+
 /* Where a block's arc leaves you. Computed once when the block is pushed,
    because it seeds both the straight run after it and the next block. */
 /* Where a block actually begins: the same point the last one ended, facing a
@@ -1383,15 +1579,50 @@ const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
    from (0,0), which is the straight line down -Z it always had. Its sideways
    weave lives in centerX() and never touched this. */
 const SEG_B = BLOCK/UPB;                 // beats per city block — 8
-const SEGS = [{ x:0, z:0, h:0 }];
+const SEGS = [makeSeg(0, 0, 0)];
 function segIndex(b){ return Math.max(0, Math.floor(b/SEG_B)); }
 function ensureSeg(i){
   while(SEGS.length <= i){
     const p2 = SEGS[SEGS.length-1];
-    SEGS.push({ x: p2.x + fwdX(p2.h)*BLOCK, z: p2.z + fwdZ(p2.h)*BLOCK, h: p2.h });
+    SEGS.push(makeSeg(p2.x + fwdX(p2.h)*BLOCK, p2.z + fwdZ(p2.h)*BLOCK, p2.h));
   }
   return SEGS[i];
 }
+/* HOW WIDE IS THE STREET I AM ON, at beat b. The class is a step function of
+   the lattice — a street is 5 or 3 or 1 and nothing in between — so the
+   interpolation lives HERE rather than in the city: the road narrows over the
+   last stride into a crossing and opens over the first stride out of it, which
+   is what lets you see a side street closing in before you are in it.
+
+   Symmetric about the crossing on purpose: at the crossing itself the width is
+   exactly halfway between the two streets, so a turn does not step the road
+   under you no matter which way it goes.                                     */
+const CLS_BLEND = 1.2;                             // beats either side of a crossing
+function streetLanesAt(b){
+  const i = segIndex(b), here = ensureSeg(i).cls;
+  const ub = b - i*SEG_B;                          // beats into this block
+  const sm = t => t*t*(3-2*t);
+  if(ub < CLS_BLEND){
+    const pv = i > 0 ? ensureSeg(i-1).cls : here;
+    return pv + (here-pv)*sm(0.5 + 0.5*ub/CLS_BLEND);
+  }
+  if(ub > SEG_B - CLS_BLEND)
+    return here + (ensureSeg(i+1).cls - here)*sm(0.5*(ub - (SEG_B-CLS_BLEND))/CLS_BLEND);
+  return here;
+}
+/* THE CLASS, AS A CLASS. streetLanesAt() is a WIDTH and it is deliberately
+   continuous — the road has to narrow into a corner rather than step at it. But
+   rounding that width and calling it a class is wrong, and wrong in a way that
+   shows: across the 2.4 beats of a crossing it rounds to 4 and to 2, and there
+   is no such thing as a four-lane street here. The HUD printed `undefined` and
+   the bed fell through every arm of its arrangement test and played a fourth
+   thing nobody wrote.
+
+   So the two questions are separated. How wide is the road → the blend. WHICH
+   STREET AM I ON → the segment, unblended, a step at the crossing. An
+   arrangement should change on a corner like an edit, not cross-fade through a
+   street that does not exist. */
+const streetClsAt = b => ensureSeg(segIndex(b)).cls;
 function pathInto(b, out){
   const i = segIndex(b);
   const s2 = ensureSeg(i), u = Math.max(0, (b - i*SEG_B)*UPB);
@@ -1625,6 +1856,7 @@ let TRACK = TRACKS.atlantica;
    node graph to start walking is now a choice. */
 function selectTrack(key){
   TRACK = TRACKS[key] || TRACKS.atlantica;
+  gridNow = !!TRACK.grid;                              // see the note on gridNow
   GEARS = TRACK.gears; PENT = TRACK.scale; ROOTS = TRACK.roots;
   NOTE_NAMES = TRACK.names; NODES = TRACK.nodes; PAL = TRACK.pal;
   TRACK_NAME = TRACK.name;
@@ -1635,7 +1867,7 @@ function selectTrack(key){
     if(stemEls[STEMS[i].key]) stemEls[STEMS[i].key].row.querySelector('.nm').textContent = TRACK.names[i];
   }
   EVENTS.length = 0; ROUTE.length = 0; routeEndBeat = 0;
-  SEGS.length = 0; SEGS.push({ x:0, z:0, h:0 });      // back to the first block
+  SEGS.length = 0; SEGS.push(makeSeg(0, 0, 0));       // back to the first block
   FRAME.init = false;                                  // and the camera with it
   pushNode(TRACK.start, 'S');
 }
@@ -2179,11 +2411,48 @@ const Clock = {
 
      AND THE ROOM. Vinyl crackle, a slap-back instead of a flooded hall, and
      the whole thing sitting slightly dark. It should sound like it is coming
-     off a record rather than out of a machine. */
+     off a record rather than out of a machine.
+
+     ══ AND THE STREET IS THE ARRANGEMENT ═══════════════════════════════
+     One bed, three sizes, chosen by the width of the road you are on. Turning
+     is now a mix move, and it is the same gesture that steers — which is the
+     whole reason the city has street classes at all.
+
+       MAIN ROAD (5)   the record as cut. Full kit, walking bass, chank on every
+                       offbeat, horns on the turnaround, I-vi-ii-V.
+       SIDE STREET (3) the band moves into a smaller room. Horns gone, chank
+                       only after the backbeat, tambourine on quarters, half the
+                       bassline - and the harmony sits down on the vi, so
+                       turning off the boulevard goes MINOR. That is the change
+                       you hear first, before you notice anything is missing.
+       ALLEY (1)       the break. Drums, one pedal note, a stick on the 8ths,
+                       and the mix starts pumping because there is nothing left
+                       to hold the floor. Four seconds of it and you are out.
+
+     Everything below reads `cls` and nothing above it had to change: the
+     scheduler still calls voice() once per 16th and the bed still decides what
+     a 16th means. */
+  // vi - the relative minor. Turning off the main drag lands here.
+  SIDE_ROOTS: [4, 4, 3, 3],
   bedStreet(step, t){
     const s16 = step % 16, bar = Math.floor(step/16);
-    const root = ROOTS[bar % 4];
+    /* WHICH STREET, AT THIS 16TH. The scheduler runs 120ms ahead, so this is
+       effectively "now": turn at a crossing and the very next 16th is already
+       playing the new street. No fade, no bar-line wait - a corner is an edit. */
+    const cls = TRACK.grid ? streetClsAt(step/4) : 5;
+    const main = cls >= 5, side = cls === 3, alley = cls <= 1;
+    /* THE HARMONY MOVES WITH THE ROAD. An alley pedals the tonic - one chord,
+       one note, no motion, which is what makes it read as a hole in the record
+       rather than a quieter version of it. */
+    const root = alley ? ROOTS[0] : (side ? this.SIDE_ROOTS : ROOTS)[bar % 4];
     const c = this.ctx, D = this.duck, K = D;
+    /* THE ROOM NARROWS TOO. A slap-back is a reflection off a wall, and in an
+       alley the wall is four feet away - so the send goes up as the street
+       closes in. Set once a bar, ramped, so it is a room and not an effect
+       being switched. */
+    if(s16 === 0 && this.fx)
+      this.fx.gain.setTargetAtTime(TRACK.echo.send * (alley ? 2.1 : side ? 1.45 : 1.0),
+                                   t, 0.25);
 
     /* KICK — 1 and 3, with a pickup 16th ahead of the 3 that makes the bar
        lean forward. Rounder than the house kick: a shorter pitch drop from a
@@ -2203,8 +2472,12 @@ const Clock = {
       this.noise(t, 0.006, 2000, 'highpass', 0.10*soft, this.kickDrive);
       // Barely a duck. Named and kept so the contrast with bedWater is on the
       // record: this is the same line of code doing a quarter of the work.
-      D.gain.setValueAtTime(0.90, t);
-      D.gain.exponentialRampToValueAtTime(1.0, t + 0.10);
+      /* EXCEPT IN AN ALLEY, where it ducks like house does. With the horns,
+         the chank and most of the bass gone there is nothing holding the floor
+         between the drums, so the mix is allowed to breathe - and the pump is
+         what turns four bars of near-silence into a break instead of a gap. */
+      D.gain.setValueAtTime(alley ? 0.52 : 0.90, t);
+      D.gain.exponentialRampToValueAtTime(1.0, t + (alley ? 0.19 : 0.10));
     }
 
     /* SNARE + HANDCLAPS on 2 and 4 — the hardest hit in the bar. The clap is
@@ -2227,20 +2500,44 @@ const Clock = {
     /* TAMBOURINE — every 8th, and harder on the offbeat. Short, bright, and
        slightly different every hit, because a tambourine is a handful of
        jingles and never lands twice the same way. */
+    /* TAMBOURINE - every 8th on the boulevard, and it thins with the street.
+       On a side street it drops to the quarters and gets a dry stick on the
+       offbeat instead, which is the same grid told drier. In an alley the
+       tambourine is gone altogether and the 8ths are a stick on a rim: nobody
+       carries a tambourine down an alley. The GRID never changes - the
+       tambourine is still what tells you where the 8ths are - only what is
+       holding it. */
     if(s16 % 2 === 0){
       const off = (s16 % 4 === 2);
-      const g = (off ? 0.20 : 0.11) * (0.86 + Math.random()*0.28);
-      this.noise(t, off ? 0.075 : 0.045, 7600 + Math.random()*1800, 'highpass', g, K);
-      this.noise(t + 0.006, 0.03, 11000, 'highpass', g*0.5, K);
+      if(alley){
+        // Stick on a rim. Tight, wooden, and the only thing keeping the grid.
+        this.tone(t, off ? 1180 : 940, 'square', 0.001, off ? 0.028 : 0.018,
+                  off ? 0.085 : 0.05, 4200, K);
+        this.noise(t, 0.012, 5200, 'bandpass', off ? 0.10 : 0.055, K);
+      } else if(side && off){
+        this.noise(t, 0.020, 6200, 'bandpass', 0.11, K);      // dry stick
+        this.tone(t, 1320, 'square', 0.001, 0.022, 0.055, 5200, K);
+      } else {
+        const g = (off ? 0.20 : 0.11) * (0.86 + Math.random()*0.28) * (side ? 0.85 : 1);
+        this.noise(t, off ? 0.075 : 0.045, 7600 + Math.random()*1800, 'highpass', g, K);
+        this.noise(t + 0.006, 0.03, 11000, 'highpass', g*0.5, K);
+      }
     }
 
     /* THE BASSLINE. Sixteenth grid, degree offsets from the bar's own root,
        so the same figure becomes a new line every bar as the progression
        moves under it. Triangle through a resonant lowpass with a fast attack:
        a wound string on a hollow body, not a synth. */
+    /* THE BASSLINE, AND HOW MUCH OF IT. A walking line needs room to walk;
+       the narrower the street the less of it there is. A side street keeps the
+       first half of the figure - the walk up, not the way back down - and an
+       alley keeps one note per half bar and holds it, which is the pedal the
+       break sits on. */
     for(const [ss, dd] of SOUL_BASS){
       if(ss !== s16) continue;
-      let deg = root + dd;
+      if(alley && ss !== 0 && ss !== 8) continue;
+      if(side && ss > 8) continue;
+      let deg = root + (alley ? 0 : dd);
       while(deg > 8) deg -= 5;                 // an octave is five degrees here
       const f = p(Math.max(0, deg));
       const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
@@ -2248,18 +2545,19 @@ const Clock = {
       lp.type = 'lowpass'; lp.Q.value = 4;
       lp.frequency.setValueAtTime(f*9, t);
       lp.frequency.exponentialRampToValueAtTime(f*2.6, t + 0.10);
+      const bdur = alley ? 0.62 : 0.24;              // the pedal is HELD
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.42, t + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+      g.gain.exponentialRampToValueAtTime(alley ? 0.50 : 0.42, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + bdur);
       o.connect(lp).connect(g).connect(K);
-      o.start(t); o.stop(t + 0.28);
+      o.start(t); o.stop(t + bdur + 0.04);
     }
 
     /* THE CHANK — a short chord on every offbeat 8th, the guitar-and-piano
        upstroke that fills the space between the kick and the snare. Three
        consecutive pentatonic degrees, so it is a real triad and cannot clash
        with anything the player does above it. */
-    if(s16 % 4 === 2){
+    if(s16 % 4 === 2 && !alley && !(side && s16 === 2)){
       for(let i=0;i<3;i++){
         const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
         o.type = 'triangle'; o.frequency.value = p(root + 10 + i);
@@ -2276,7 +2574,7 @@ const Clock = {
     /* HORNS on the turnaround. Last bar of the four, answering the phrase —
        a section always announced the end of a verse, and it is the one place
        the bed is allowed to be loud. */
-    if(bar % 4 === 3 && (s16 === 8 || s16 === 14)){
+    if(main && bar % 4 === 3 && (s16 === 8 || s16 === 14)){
       const hi = s16 === 14;
       for(const d of (hi ? [12, 14] : [10, 12, 14])){
         const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
@@ -2294,10 +2592,57 @@ const Clock = {
 
     /* VINYL. A record is not silent between the notes — it ticks. Sparse,
        random, and quiet enough that you only notice it when it stops. */
-    if(Math.random() < 0.30)
+    /* Louder in an alley, because in an alley the record is not the mix: it is
+       somebody's window, two floors up, and it is the only thing there. */
+    if(Math.random() < (alley ? 0.55 : 0.30))
       this.noise(t + Math.random()*this.spb()*0.25, 0.004,
-                 2600 + Math.random()*5200, 'highpass', 0.010 + Math.random()*0.022,
+                 2600 + Math.random()*5200, 'highpass',
+                 (alley ? 0.020 : 0.010) + Math.random()*(alley ? 0.040 : 0.022),
                  this.master);
+  },
+
+  /* --- THE CORNER, HEARD ------------------------------------------------
+     A turn that changes the width of the street changes the arrangement, and
+     an arrangement change with no transient on it sounds like a dropout. So
+     the corner gets a sound of its own, and it says WHICH WAY the street went
+     rather than just "something happened":
+
+       - tyres, always: a filtered noise sweep, the scuff of the turn itself;
+       - a two-note stab, RISING into a wider street and FALLING into a
+         narrower one. You know whether you have gained the band back or lost
+         it before the next bar tells you.
+
+     Brass, short, and through the same slap-back as everything else, so it
+     belongs to the record rather than sitting on top of it. */
+  turnStab(fromCls, toCls){
+    if(!this.started) return;
+    const c = this.ctx, t = c.currentTime, up = toCls > fromCls;
+    const sr = c.sampleRate;
+    const buf = c.createBuffer(1, Math.floor(sr*0.30), sr), d = buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/d.length, 1.4);
+    const s2 = c.createBufferSource(); s2.buffer = buf;
+    const bp = c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value = 3.2;
+    bp.frequency.setValueAtTime(up ? 900 : 2200, t);
+    bp.frequency.exponentialRampToValueAtTime(up ? 2400 : 700, t + 0.26);
+    const sg = c.createGain(); sg.gain.setValueAtTime(0.20, t);
+    sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
+    s2.connect(bp).connect(sg).connect(this.drive); s2.start(t);
+    // The stab. Two degrees of the scale, so it cannot clash with the bed.
+    const lo = ROOTS[0] + 10, hi = ROOTS[0] + 12;
+    for(const [deg, dt2] of (up ? [[lo,0],[hi,0.085]] : [[hi,0],[lo,0.085]])){
+      const tt = t + dt2;
+      for(const det of [-6, 6]){
+        const o = c.createOscillator(), f = c.createBiquadFilter(), g = c.createGain();
+        o.type = 'sawtooth'; o.frequency.value = p(deg); o.detune.value = det;
+        f.type = 'bandpass'; f.Q.value = 1.5; f.frequency.value = p(deg)*2.3;
+        g.gain.setValueAtTime(0.0001, tt);
+        g.gain.exponentialRampToValueAtTime(0.13, tt + 0.014);
+        g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.20);
+        o.connect(f).connect(g).connect(this.duck);
+        const sd = c.createGain(); sd.gain.value = 0.6; g.connect(sd).connect(this.fx);
+        o.start(tt); o.stop(tt + 0.24);
+      }
+    }
   },
 
   /* THE MELODY VOICE — a sustained tone that glides to whatever pentatonic
@@ -2547,12 +2892,25 @@ const Game = {
        because a segment is three numbers and they are generated straight on
        demand — and correct by construction, which the hand re-seeding of the
        old version was not. */
+    const was = SEGS[i] ? SEGS[i].cls : LANES;
     SEGS.length = i;
-    SEGS.push({ x: prev.x + fwdX(prev.h)*BLOCK,
-                z: prev.z + fwdZ(prev.h)*BLOCK,
-                h: prev.h + dir*(Math.PI/2) });
-    judge(dir < 0 ? '◄ TURN' : 'TURN ►', '#e05ca8');
+    SEGS.push(makeSeg(prev.x + fwdX(prev.h)*BLOCK,
+                      prev.z + fwdZ(prev.h)*BLOCK,
+                      prev.h + dir*(Math.PI/2)));
+    const now = SEGS[i].cls;
+    /* THE MUSIC TURNS WITH THE CAR. Everything past this crossing was regrown
+       from the new heading a line ago; the chart has to be regrown from it too,
+       because the figure played over a block is chosen by that block's WIDTH.
+       Drive into an alley and the phrase you were about to play is not the
+       phrase for an alley, so it is replaced — in the bar you turned in, not at
+       the next section boundary. That is the whole point of the feature: you
+       are choosing the arrangement with the steering. */
+    if(TRACK.grid) regrowChart(i, Clock.songBeat());
+    judge(now === was ? (dir < 0 ? '◄ TURN' : 'TURN ►')
+                      : (dir < 0 ? '◄ ' : '') + CLS_NAME[now] + (dir < 0 ? '' : ' ►'),
+          now === was ? '#e05ca8' : now > was ? '#f5a93c' : '#4fd4e4');
     Clock.latch();
+    if(now !== was) Clock.turnStab(was, now);
     return true;
   },
 
@@ -3335,6 +3693,619 @@ gate.addEventListener('click', ()=>{
   selectTrack(gPick);
   Clock.start(); gate.classList.add('hide'); showTouchHint(); }, {once:true});
 
+/* ══════════════════════════════════════════════════════════════════════════
+   SOUL TOWN, DRAWN
+   ══════════════════════════════════════════════════════════════════════════
+   The lattice made every street in the city exist at once. This makes them
+   different from each other, which is the other half of the same idea: a turn
+   is only a choice if the two directions are telling you different things
+   before you commit.
+
+   Three axes of difference, and each one is legible from a block away:
+
+     WIDTH      the street's class. A boulevard is five lanes with a dashed
+                centre line; a side street is three with cars at both kerbs; an
+                alley is one, between walls, with things in it.
+     DISTRICT   what stands along it. Four of them tiled over the lattice —
+                works, houses, theatres, yards — each with its own masonry, its
+                own neon and its own idea of what a building is for. Drive far
+                enough in one direction and the town changes.
+     SIGNS      at every crossing, a plate over the mouth of each branch with
+                one pip per lane. Five pips is the main road. One pip is an
+                alley. There is no font in this renderer and there does not
+                need to be: counting is faster to read than reading.
+
+   Everything here is a pure function of the lattice indices, so the city is
+   the same city every time you come back to it, and none of it is stored.
+
+   ── AND IN SIDE VIEW IT GETS OUT OF THE WAY ─────────────────────────────
+   The melody layer looks at the road from beside it, which puts whatever
+   stands between the camera and the staff directly in front of the notes. The
+   old sink was (h + 12), and that was short by half: a slab is drawn about its
+   CENTRE with a half-height of h, so its roof is 1.5h above its anchor and the
+   tall blocks still stood eight units clear of the deck. What you saw was a row
+   of low buildings in front of the staff — which is exactly what a tall
+   building looks like when you sink it by two thirds of its height.
+
+   So the sink is now one number, applied to every prop in the city and larger
+   than the tallest thing in it. Nothing pokes up, whatever its height, and
+   there is no per-object arithmetic left to get wrong.                       */
+const CITY = { sink:0, yaw:0, R:340, beat:0, deck:[0.1,0.1,0.1] };
+const CITY_SINK = 150;              // clears the tallest blade sign in the town
+
+function cityVis(wx, wz){
+  viewInto(wx, wz, FRAME.o, FRAME.ch, FRAME.sh, VW);
+  return VW.z < 30 && VW.z > -352;
+}
+/* Every prop in the city goes through here: world position in, view position
+   out, frustum cull and side-view sink folded in. Sizes are WORLD-axis half
+   extents — the yaw is the world-to-view rotation, so a box specified in world
+   axes comes out square to the street it is standing on whichever street that
+   is, and there is only ever one yaw to get right. */
+function cityBox(wx, wz, y, sx, sy, sz, r, g, b, glow){
+  if(!cityVis(wx, wz)) return;
+  pushInst(MESH_BOX, VW.x, y - CITY.sink, VW.z, sx, sy, sz, r, g, b, 0, 0, glow, CITY.yaw);
+}
+function citySph(wx, wz, y, rr, r, g, b, glow){
+  if(!cityVis(wx, wz)) return;
+  pushInst(MESH_SPH, VW.x, y - CITY.sink, VW.z, rr, rr, rr, r, g, b, 0, 0, glow);
+}
+
+/* ── the lit sign ───────────────────────────────────────────────────────
+   Neon is the single most 1960s thing a city has, and a neon sign that holds
+   still is a painted board. So every emissive surface in the town gets a phase
+   off its own position and a behaviour off a hash: most of them breathe with
+   the beat, a few chase, and one in six is broken and stutters. The city
+   therefore pulses in time with the record, which costs one multiply and is
+   most of why the place reads as awake. */
+function neonGlow(seed){
+  const k = hash2(seed*13.1, seed*3.7);
+  const ph = CITY.beat*Math.PI + seed*6.283;
+  if(k < 0.17) return (Math.floor(CITY.beat*3 + seed*5) % 5) ? 1.15 : 0.14;   // faulty tube
+  if(k < 0.45) return 0.72 + 0.48*Math.sin(ph);                               // breathing
+  return 1.05;                                                                // steady
+}
+
+/* ── 1960s paintwork ────────────────────────────────────────────────────
+   Turquoise, cream, maroon, sage, coral, black. Six cars, and the reason they
+   are hard-coded rather than hashed out of the whole colour cube is that this
+   exact palette is what the period looked like — a random hue is a modern car
+   in a period street and reads as wrong before you can say why. */
+const CAR_COL = [
+  [0.16,0.52,0.52], [0.82,0.78,0.66], [0.42,0.10,0.14],
+  [0.36,0.44,0.30], [0.86,0.42,0.30], [0.09,0.09,0.11]
+];
+/* A car at the kerb. Four boxes and two lamps: body, roof, and the chrome line
+   between them that separates a car of this era from a wedge. `alongX` is the
+   direction the street runs, so it parks parallel to the kerb rather than in
+   the road. */
+function cityCar(wx, wz, alongX, seed){
+  const col = CAR_COL[(hash2(seed*7.7, 2.3)*6)|0];
+  const L = 2.55, Wd = 1.02;                          // half length, half width
+  const sx = alongX ? L : Wd, sz = alongX ? Wd : L;
+  const y0 = DECK_Y + 0.05;
+  cityBox(wx, wz, y0 + 0.52, sx, 0.50, sz, col[0], col[1], col[2], 0);
+  // Chrome waistline — thin, bright, and the whole silhouette hangs off it.
+  cityBox(wx, wz, y0 + 1.02, sx*0.99, 0.06, sz*1.02, 0.62, 0.64, 0.66, 0.18);
+  // Cabin, set back a little so the car has a bonnet.
+  const bx = alongX ? -0.25*L : 0, bz = alongX ? 0 : -0.25*L;
+  cityBox(wx + bx, wz + bz, y0 + 1.48,
+          alongX ? L*0.46 : Wd*0.86, 0.42, alongX ? Wd*0.86 : L*0.46,
+          col[0]*0.8, col[1]*0.8, col[2]*0.8, 0);
+  // Tail lamps. A parked street of these is what gives the asphalt its depth.
+  const lx = alongX ? L*0.96 : 0, lz = alongX ? 0 : L*0.96;
+  cityBox(wx + lx, wz + lz, y0 + 0.66, alongX ? 0.08 : 0.34, 0.11, alongX ? 0.34 : 0.08,
+          0.96, 0.18, 0.12, 0.9);
+  cityBox(wx - lx, wz - lz, y0 + 0.70, alongX ? 0.08 : 0.32, 0.13, alongX ? 0.32 : 0.08,
+          0.98, 0.92, 0.74, 0.55);
+}
+
+/* ── ONE FACADE ─────────────────────────────────────────────────────────
+   A block face, in the street's own frame. `u` runs ALONG the street from the
+   middle of the face, `v` runs OUTWARD from the wall toward the road, so an
+   archetype can be written once and placed on any of the four sides of any
+   cell in any of the four directions without a single sign flip in it. That
+   frame is the reason this is six short recipes rather than six times four.
+
+   LOD is by distance and it is aggressive, because a city is mostly things you
+   are not looking at: past 210 units a facade is one slab, and only inside 130
+   does it get its marquee, its fire escape and its bulbs. */
+const CITY_FRAME = { cx:0, cz:0, along:0, sgn:1 };
+function facePut(u, v, y, su, sy, sv, r, g, b, glow){
+  const F = CITY_FRAME;
+  if(F.along){                                        // face runs along X
+    cityBox(F.cx + u, F.cz + F.sgn*v, y, su, sy, sv, r, g, b, glow);
+  } else {                                            // face runs along Z
+    cityBox(F.cx + F.sgn*v, F.cz + u, y, sv, sy, su, r, g, b, glow);
+  }
+}
+function faceSph(u, v, y, rr, r, g, b, glow){
+  const F = CITY_FRAME;
+  if(F.along) citySph(F.cx + u, F.cz + F.sgn*v, y, rr, r, g, b, glow);
+  else        citySph(F.cx + F.sgn*v, F.cz + u, y, rr, r, g, b, glow);
+}
+
+/* ── SCALE, STATED ONCE ─────────────────────────────────────────────────
+   One world unit is about a metre, and every number below depends on it:
+   LANE_W is 3.4 and a lane is three and a half metres; BLOCK is 160 and a city
+   block is a hundred and sixty. So a window is 1.8 across, a car is 5 long, a
+   shopfront sign is 24, a building is 30 to 40 wide.
+
+   Which means DETAILS ARE WRITTEN IN ABSOLUTE UNITS and only their PLACEMENT
+   is scaled by the building they are on. The first draft scaled the details as
+   well — `len*0.86` for a neon strip — and since a block face is a hundred
+   units long, the town came out with hundred-metre neon tubes and billboards
+   the size of the buildings they stood in front of, hanging in the air. If a
+   number here is a fraction of `L`, it is a position. If it is a size, it is
+   metres.                                                                    */
+
+/* A BLOCK FACE IS A TERRACE, not a building. Three buildings side by side,
+   each with its own archetype, height and paintwork — because the thing that
+   makes a street look like a street is that the next door along is somebody
+   else's. One slab per face was a retaining wall with windows painted on it,
+   and no amount of detail on it would have read as a city.
+
+   It also puts the variety at the right frequency: a block is eight beats, so
+   one archetype per block changes on the bar and three per block changes as
+   you drive past, which is the rate a city goes by at.                       */
+const FACE_N = 3;
+
+/* A grid of lit and unlit windows. The cheapest thing that makes a wall read
+   as inhabited, and the lit fraction is hashed PER WINDOW rather than per
+   building because a building where every window agrees looks switched on
+   rather than lived in. */
+function faceWindows(seed, u0, L, roofY, y0, warm){
+  const cols = Math.max(2, Math.round(L/3.1)), rows = Math.max(1, Math.floor((roofY - y0 - 2.2)/4.0));
+  for(let c2=0;c2<cols;c2++) for(let r2=0;r2<rows;r2++){
+    if(hash2(seed*31.7 + c2*5.3, r2*9.1) < 0.40) continue;
+    const u = u0 + (c2 + 0.5 - cols/2)*(2*L/cols);
+    const lit = hash2(seed + r2*2.1, c2*3.3);
+    // A window is 1.1 by 1.7 metres and taller than it is wide, like a sash
+    // window. The first pass had them nearly two metres square, which at
+    // fifteen metres from the camera reads as a lit shop unit per floor.
+    facePut(u, 7.62, y0 + r2*4.0, 0.55, 0.85, 0.10,
+            warm[0], warm[1], warm[2], 0.22 + lit*0.52);
+  }
+}
+
+/* THE SIX BUILDINGS. Each is a SILHOUETTE first: you should know what it is
+   from its outline at two hundred units, before a single window resolves. A
+   works has a sawtooth roof, a chapel has a spire, a theatre has a blade sign
+   standing clear of the roofline, and a lot has no roof at all. */
+function faceTenement(D, seed, u0, L, h, w, near){
+  const roofY = DECK_Y - 2 + h*1.5;
+  facePut(u0, 0, DECK_Y - 2 + h*0.5, L, h, 7.5, w[0], w[1], w[2], 0);
+  faceWindows(seed, u0, L, roofY, DECK_Y + 4.2, [1.00, 0.80, 0.42]);
+  if(!near) return;
+  // Cornice. One thin bright line at the roofline and the wall stops being a box.
+  facePut(u0, 0.4, roofY - 0.5, L*1.01, 0.45, 7.9, w[0]*1.7, w[1]*1.6, w[2]*1.5, 0);
+  /* THE FIRE ESCAPE. Landings and their uprights, hung off the face. No
+     diagonals: a stair rotated into a facade's frame needs a second rotation
+     axis, and the silhouette does not need one to read. */
+  for(let l2=0; l2<4; l2++){
+    const y = DECK_Y + 6.0 + l2*4.2;
+    if(y > roofY - 1.5) break;
+    facePut(u0, 9.0, y, 3.4, 0.09, 0.95, 0.13, 0.12, 0.13, 0);
+    facePut(u0, 9.5, y + 0.7, 3.4, 0.42, 0.05, 0.16, 0.15, 0.16, 0);
+    for(const uu of [-3.2, 3.2]) facePut(u0 + uu, 9.0, y + 2.1, 0.08, 2.1, 0.08, 0.14, 0.13, 0.14, 0);
+  }
+  // A stoop and a doorway light. Somebody lives here.
+  facePut(u0 + L*0.55, 8.6, DECK_Y + 0.4, 1.7, 0.4, 1.1, 0.20, 0.19, 0.20, 0);
+  faceSph(u0 + L*0.55, 8.1, DECK_Y + 3.4, 0.26, 1.00, 0.84, 0.52, neonGlow(seed + 4));
+}
+
+function faceWorks(D, seed, u0, L, h, w, near){
+  const hh = h*0.60, roofY = DECK_Y - 2 + hh*1.5;
+  facePut(u0, 0, DECK_Y - 2 + hh*0.5, L, hh, 7.5, w[0]*1.15, w[1]*1.10, w[2]*1.05, 0);
+  /* A SAWTOOTH ROOF — what a shed built to be daylit looks like, and instantly
+     not a house. Three teeth, each with its glazed face turned north and cold. */
+  if(near) for(let k=0;k<3;k++){
+    const u = u0 + (k - 1)*(L*0.62);
+    facePut(u, 1.0, roofY + 1.3, L*0.28, 1.3, 3.4, 0.10, 0.10, 0.12, 0);
+    facePut(u + L*0.20, 1.0, roofY + 1.8, 0.30, 1.6, 3.4, 0.32, 0.44, 0.50, 0.28);
+  }
+  // Loading bay, and the lamp over it — the only warm thing on the wall.
+  facePut(u0 - L*0.3, 7.7, DECK_Y + 2.4, 3.2, 2.4, 0.18, 0.04, 0.04, 0.05, 0);
+  facePut(u0 - L*0.3, 7.4, DECK_Y + 5.4, 1.2, 0.16, 0.55, D.neon[0], D.neon[1], D.neon[2],
+          neonGlow(seed + 1));
+  if(!near) return;
+  facePut(u0 + L*0.45, 7.7, DECK_Y + 3.4, 1.4, 1.1, 0.14, 0.30, 0.42, 0.46, 0.30);  // office light
+  // A chimney with a light on it, because a works needs a vertical.
+  facePut(u0 + L*0.72, -3.0, roofY + 7.5, 0.85, 7.5, 0.85, 0.09, 0.08, 0.09, 0);
+  faceSph(u0 + L*0.72, -3.0, roofY + 15.4, 0.32, 0.98, 0.22, 0.16, neonGlow(seed + 9));
+}
+
+function faceTheatre(D, seed, u0, L, h, w, near){
+  const roofY = DECK_Y - 2 + h*1.5;
+  facePut(u0, 0, DECK_Y - 2 + h*0.5, L, h, 7.5, w[0], w[1], w[2], 0);
+  /* THE BLADE SIGN. A theatre announces itself vertically — the sign stands
+     clear of the roofline so it can be read from the far end of the street,
+     which is exactly the job it has to do here too. Four stacked segments, so
+     it can chase upward rather than merely be bright. */
+  facePut(u0 + L*0.62, 7.6, roofY + 8.0, 0.26, 8.6, 0.26, 0.12, 0.11, 0.13, 0);
+  for(let k=0;k<4;k++){
+    const on = (Math.floor(CITY.beat*2) % 4) === k ? 1.40 : 0.42;
+    facePut(u0 + L*0.62, 8.1, roofY + 2.6 + k*3.4, 1.35, 1.35, 0.24,
+            D.neon[0], D.neon[1], D.neon[2], on);
+  }
+  faceWindows(seed, u0 - L*0.2, L*0.6, roofY, DECK_Y + 9.5, [0.96, 0.86, 0.62]);
+  if(!near) return;
+  /* THE MARQUEE. A canopy out over the pavement with bulbs chasing round its
+     edge — the one thing in this town that is unmistakably somewhere you go at
+     one in the morning. */
+  const mw = Math.min(L*0.78, 9.0);
+  // The canopy is a DARK slab. Only its outer edge is lit — a marquee is a
+  // board with bulbs round it, and painting the whole underside as neon (the
+  // first pass) gives you a twenty-metre glowing plane hanging over the road,
+  // which swallows the street and everything standing in it.
+  facePut(u0, 10.0, DECK_Y + 5.8, mw, 0.30, 2.5, 0.13, 0.12, 0.14, 0);
+  facePut(u0, 12.35, DECK_Y + 6.5, mw*0.99, 0.80, 0.16,
+          D.neon[0], D.neon[1], D.neon[2], neonGlow(seed + 3)*0.85);
+  for(let k=0;k<7;k++){
+    const on = (Math.floor(CITY.beat*4 + k) % 7) < 3 ? 1.30 : 0.20;
+    faceSph(u0 + (k - 3)*(mw/3.4), 12.2, DECK_Y + 5.3, 0.22, 1.00, 0.90, 0.62, on);
+  }
+  facePut(u0, 7.7, DECK_Y + 2.1, 3.0, 2.1, 0.16, 1.00, 0.86, 0.54, 0.62);  // lobby
+}
+
+function faceShopfront(D, seed, u0, L, h, w, near){
+  const hh = h*0.50, roofY = DECK_Y - 2 + hh*1.5;
+  facePut(u0, 0, DECK_Y - 2 + hh*0.5, L, hh, 7.5, w[0]*1.25, w[1]*1.18, w[2]*1.10, 0);
+  // A NEON STRIP the width of the shop. Reads as a row of businesses.
+  facePut(u0, 7.85, DECK_Y + 4.7, L*0.46, 0.34, 0.20,
+          D.neon[0], D.neon[1], D.neon[2], neonGlow(seed));
+  facePut(u0, 7.90, DECK_Y + 2.0, L*0.68, 1.7, 0.16, 0.88, 0.76, 0.50, 0.45);   // window
+  if(!near) return;
+  facePut(u0, 9.4, DECK_Y + 3.6, L*0.76, 0.16, 1.8, 0.22, 0.10, 0.12, 0);       // awning
+  /* A HANGING SIGN, out from the wall at right angles so it reads walking
+     rather than driving. A small piece of pedestrian scale, and the city needs
+     some or it is only ever seen at 40 miles an hour. */
+  facePut(u0 + L*0.72, 9.2, DECK_Y + 6.2, 0.16, 1.15, 1.5,
+          D.neon[1], D.neon[2], D.neon[0], neonGlow(seed + 2));
+  faceWindows(seed, u0, L, roofY, DECK_Y + 7.6, [1.00, 0.82, 0.46]);
+}
+
+function faceChapel(D, seed, u0, L, h, w, near){
+  const ll = L*0.62, roofY = DECK_Y - 2 + h*1.5;
+  facePut(u0, 0, DECK_Y - 2 + h*0.5, ll, h, 7.5, w[0]*0.92, w[1]*0.95, w[2]*1.02, 0);
+  // The spire. Two boxes and a cross — a skyline you can navigate by.
+  facePut(u0, 0, roofY + 3.4, ll*0.44, 3.4, 2.8, w[0]*0.80, w[1]*0.82, w[2]*0.90, 0);
+  facePut(u0, 0, roofY + 9.0, ll*0.22, 2.8, 1.4, w[0]*0.70, w[1]*0.72, w[2]*0.82, 0);
+  if(!near) return;
+  facePut(u0, 0, roofY + 13.0, 0.13, 1.5, 0.13, 0.92, 0.84, 0.58, 0.75);
+  facePut(u0, 0, roofY + 13.4, 0.70, 0.13, 0.13, 0.92, 0.84, 0.58, 0.75);
+  // A rose window, and light under the door. The warmest thing in the block.
+  faceSph(u0, 7.7, DECK_Y + 8.4, 1.05, 0.98, 0.74, 0.42, 0.85);
+  facePut(u0, 7.8, DECK_Y + 2.0, 1.5, 1.9, 0.16, 0.96, 0.80, 0.50, 0.62);
+}
+
+function faceLot(D, seed, u0, L, h, w, near){
+  /* AN EMPTY LOT, and it earns its place by being the one facade with NO
+     building on it. A street of unbroken walls reads as a canyon; the gaps are
+     what make the rest of the town look built rather than extruded, and they
+     are how you see the district behind this one. */
+  facePut(u0, 2.0, DECK_Y - 1.6, L, 0.10, 6.0, 0.052, 0.050, 0.056, 0);         // gravel
+  // Chain link: posts and two rails. Thin, repetitive, cold.
+  const N = Math.max(3, Math.round(L/5));
+  for(let k=0;k<N;k++)
+    facePut(u0 + (k - (N-1)/2)*(2*L/N), 8.0, DECK_Y + 1.7, 0.08, 1.9, 0.08, 0.20, 0.21, 0.22, 0);
+  for(const y of [DECK_Y + 0.7, DECK_Y + 3.2])
+    facePut(u0, 8.0, y, L*0.96, 0.05, 0.05, 0.24, 0.25, 0.26, 0.10);
+  /* THE HOARDING. Legs, panel, and a lit border. A billboard is the only thing
+     in a 1960s city allowed to be bigger than what it stands in front of —
+     which is why it is the one detail here sized off L rather than in metres. */
+  const bw = Math.min(L*0.72, 11);
+  for(const uu of [-bw*0.85, bw*0.85])
+    facePut(u0 + uu, 3.0, DECK_Y + 4.2, 0.22, 4.4, 0.22, 0.14, 0.13, 0.14, 0);
+  facePut(u0, 3.0, DECK_Y + 11.0, bw, 3.4, 0.28,
+          D.neon[0]*0.30, D.neon[1]*0.30, D.neon[2]*0.30, 0.28);
+  if(!near) return;
+  for(const y of [DECK_Y + 14.5, DECK_Y + 7.5])
+    facePut(u0, 2.6, y, bw, 0.18, 0.18, D.neon[0], D.neon[1], D.neon[2], neonGlow(seed + 6));
+  // Two cars parked off the street, facing the wrong way. Nobody minds.
+  const F = CITY_FRAME;
+  for(let k=0;k<2;k++){
+    const u = u0 + (k - 0.5)*L*0.7, v = 4.2;
+    cityCar(F.along ? F.cx + u : F.cx + F.sgn*v,
+            F.along ? F.cz + F.sgn*v : F.cz + u, !!F.along, seed*3 + k*11.7);
+  }
+}
+const FACES = { tenement:faceTenement, works:faceWorks, theatre:faceTheatre,
+                shopfront:faceShopfront, chapel:faceChapel, lot:faceLot };
+
+/* ── ONE STREET, ONE BLOCK LONG ─────────────────────────────────────────
+   The asphalt, and everything standing on it. Drawn per EDGE rather than per
+   line, because the class is a property of an edge — which is what makes a
+   turn at a crossing a choice between two different streets rather than two
+   directions along one.
+
+   What tells you the class, in the order you notice it:
+     · the WIDTH, from a block away;
+     · the CENTRE LINE — dashes between every lane on a main road, one dashed
+       line on a side street, nothing at all in an alley;
+     · the KERBSIDE — cars along a side street, dumpsters and crates in an
+       alley, and neither on the boulevard, which is kept clear because it is
+       the road you are meant to be able to drive fast on.                    */
+function cityEdge(axis, i, j, ox, oz){
+  const cls = edgeCls(axis, i, j), hw = halfRoad(cls);
+  const alongX = axis === 1;
+  // Where the edge starts, and the unit step along it.
+  const sx0 = i*BLOCK, sz0 = j*BLOCK;                 // where the edge begins
+  const mx = alongX ? sx0 + BLOCK/2 : sx0, mz = alongX ? sz0 : sz0 + BLOCK/2;
+  if(Math.hypot(mx-ox, mz-oz) > CITY.R + BLOCK*0.6) return;
+
+  const cold = cls === 1 ? 0.80 : cls === 3 ? 0.92 : 1.0;   // narrow streets get less light
+  for(let u=0; u<BLOCK; ){
+    const wx = alongX ? sx0 + u : sx0, wz = alongX ? sz0 : sz0 + u;
+    const dd = Math.hypot(wx-ox, wz-oz);
+    const step = dd < 70 ? 8 : dd < 170 ? 16 : 32;
+    if(dd <= CITY.R){
+      const half = step*0.52;
+      cityBox(wx + (alongX ? half : 0), wz + (alongX ? 0 : half), DECK_Y - 0.26,
+              alongX ? half : hw, 0.22, alongX ? hw : half,
+              CITY.deck[0]*cold, CITY.deck[1]*cold, CITY.deck[2]*cold, 0);
+      /* MARKINGS. A main road is striped between every lane, which is the
+         thing that makes five lanes look like five lanes rather than like a
+         wide road. A side street gets one line. An alley gets none — you do
+         not stripe an alley, and its absence is a tell. */
+      if(dd < 165 && cls > 1){
+        // Lane BOUNDARIES, not lane centres: half-integer multiples of LANE_W,
+        // which is where laneX() puts the dividers on the deck you drive.
+        const lanes = cls === 5 ? [-1.5, -0.5, 0.5, 1.5] : [-0.5, 0.5];
+        for(const l2 of lanes){
+          const off = l2*LANE_W;
+          const px2 = alongX ? wx + half : wx + off;
+          const pz2 = alongX ? wz + off  : wz + half;
+          cityBox(px2, pz2, DECK_Y + 0.0,
+                  alongX ? 1.5 : 0.055, 0.03, alongX ? 0.055 : 1.5,
+                  CITY.deck[0]*2.4, CITY.deck[1]*2.2, CITY.deck[2]*2.0, 0.12);
+        }
+      }
+    }
+    u += step;
+  }
+
+  /* WHAT IS PARKED THERE. The narrowness has to have a cause you can see, or
+     the road just mysteriously shrinks: a side street is three lanes because
+     there is a row of cars down each side of it, and an alley is one lane
+     because there is nowhere to put anything except against the wall. */
+  if(cls === 5) return;
+  for(let k=0;k<6;k++){
+    const u = (k + 0.5)*(BLOCK/6);
+    const wx0 = alongX ? sx0 + u : sx0, wz0 = alongX ? sz0 : sz0 + u;
+    if(Math.hypot(wx0-ox, wz0-oz) > 165) continue;
+    for(const sg of [-1, 1]){
+      const seed = axis*97 + i*13.3 + j*7.7 + k*2.1 + (sg > 0 ? 0.5 : 0);
+      if(hash2(seed, 5.5) < (cls === 1 ? 0.62 : 0.42)) continue;
+      const off = sg*(hw + (cls === 1 ? 1.5 : 1.9));
+      const wx = alongX ? wx0 : wx0 + off, wz = alongX ? wz0 + off : wz0;
+      if(cls === 3){ cityCar(wx, wz, alongX, seed); continue; }
+      /* ALLEY FURNITURE. A dumpster, a stack of crates, or a fire in a barrel.
+         The barrel is worth the four instances on its own: it is the only
+         moving light at ground level and it is what makes an alley feel
+         occupied rather than merely narrow. */
+      const kind = hash2(seed*3.1, 9.9);
+      if(kind < 0.45){
+        cityBox(wx, wz, DECK_Y + 0.75, alongX ? 1.5 : 0.85, 0.75, alongX ? 0.85 : 1.5,
+                0.10, 0.16, 0.13, 0);
+        cityBox(wx, wz, DECK_Y + 1.58, alongX ? 1.55 : 0.90, 0.09, alongX ? 0.90 : 1.55,
+                0.14, 0.21, 0.17, 0);
+      } else if(kind < 0.78){
+        cityBox(wx, wz, DECK_Y + 0.55, 0.62, 0.55, 0.62, 0.24, 0.17, 0.11, 0);
+        cityBox(wx + 0.2, wz - 0.15, DECK_Y + 1.5, 0.50, 0.42, 0.50, 0.27, 0.19, 0.12, 0);
+      } else {
+        cityBox(wx, wz, DECK_Y + 0.62, 0.46, 0.62, 0.46, 0.13, 0.11, 0.10, 0);
+        citySph(wx, wz, DECK_Y + 1.5, 0.42 + 0.10*Math.sin(CITY.beat*5 + k),
+                1.0, 0.46, 0.14, 1.2);
+      }
+    }
+  }
+}
+
+/* ── THE SIGN AT THE CROSSING ───────────────────────────────────────────
+   The one piece of the city that exists purely to be read, and the reason a
+   turn can be planned instead of gambled: a plate over the mouth of each
+   branch carrying ONE PIP PER LANE. Five pips, main road. Three, side street.
+   One, alley.
+
+   There is no font in this renderer and it does not need one — counting five
+   things is faster than reading the numeral five, which is the same reason
+   dice have pips. Colour repeats the message for anyone reading it at speed:
+   amber boulevard, cold blue side street, red alley.
+
+   Only the CROSS street gets signs, because the street you are on is the one
+   you can already see, and only the crossings close enough to act on. The
+   plate faces along your own street, so it is square to the camera whichever
+   way you are driving.                                                       */
+const PIP_COL = { 5:[1.00,0.72,0.26], 3:[0.60,0.90,0.98], 1:[0.98,0.30,0.24] };
+function citySigns(ox, oz, i0, i1, j0, j1){
+  const h = FRAME.o.h;
+  const pAlongX = Math.abs(fwdX(h)) > 0.5;            // am I driving along X?
+  const fwdA = pAlongX ? Math.sign(fwdX(h)) : Math.sign(fwdZ(h));
+  const hwA = halfRoad(5) + 2.8;
+  /* TOWARD THE DRIVER. Anything mounted on the face of a sign — the pips, a
+     traffic light's lamps — has to sit on the side of it you are looking at,
+     and which side that is depends on which of the four ways you are driving.
+     A fixed offset gets it right for one heading out of four and buries the
+     detail inside its own backing plate for the other three, which is exactly
+     what happened: the pips were there and invisible. */
+  const nx = pAlongX ? -fwdA : 0, nz = pAlongX ? 0 : -fwdA;
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+    const X = i*BLOCK, Z = j*BLOCK;
+    if(Math.hypot(X-ox, Z-oz) > 240) continue;
+    // The two branches of the cross line leaving this crossing.
+    for(const dB of [-1, 1]){
+      /* The edge on that side. A cross line perpendicular to travel-along-X
+         runs along Z, so its edges are axis 0 at this i and the block index
+         either side of j. */
+      const cls = pAlongX ? edgeCls(0, i, dB < 0 ? j-1 : j)
+                          : edgeCls(1, dB < 0 ? i-1 : i, j);
+      const hwB = halfRoad(cls);
+      const uB = dB*(hwB + 2.9);                       // into the mouth of the branch
+      const uA = -fwdA*hwA;                            // near corner, this side of it
+      const wx = pAlongX ? X + uA : X + uB;
+      const wz = pAlongX ? Z + uB : Z + uA;
+      /* MAST, PLATE, PIPS.
+
+         OVERHEAD, because it started at head height on a short post — where a
+         theatre marquee is — and on The Strip every sign in the town was
+         inside a canopy and invisible.
+
+         And BIG. The first version was drawn at the size a real sign is, and a
+         real sign at the distance you need to read this one at is three pixels
+         across: measured, the pips came out 2.9px wide at the four beats of
+         lead a turn needs. You have to be able to count them from far enough
+         back to act, so the plate is three metres tall and a five-lane sign is
+         ten metres wide. Oversized signage is not a compromise here, it is the
+         only size at which the mechanic exists.
+
+         The PLATE ITSELF is tinted by class as well, because colour resolves
+         at a distance where counting does not: amber boulevard, cold blue side
+         street, red alley — you know roughly what is down there before the
+         pips are separable, and exactly what once they are.
+
+         Thin along your street and wide across it, so the pips lie left to
+         right in the frame however you are driving. */
+      const SY = DECK_Y + 8.8, c2 = PIP_COL[cls];
+      cityBox(wx, wz, DECK_Y + 4.4, 0.17, 4.4, 0.17, 0.13, 0.12, 0.13, 0);
+      const halfB = 0.9 + cls*0.85;
+      cityBox(wx, wz, SY, pAlongX ? 0.12 : halfB, 1.5, pAlongX ? halfB : 0.12,
+              c2[0]*0.26, c2[1]*0.26, c2[2]*0.26, 0.22);
+      for(let k=0;k<cls;k++){
+        const o2 = (k - (cls-1)/2)*1.7;
+        cityBox(wx + nx*0.22 + (pAlongX ? 0 : o2), wz + nz*0.22 + (pAlongX ? o2 : 0), SY,
+                pAlongX ? 0.14 : 0.55, 0.55, pAlongX ? 0.55 : 0.14,
+                c2[0], c2[1], c2[2], 1.30);
+      }
+    }
+    /* TRAFFIC LIGHTS, where two boulevards meet. Nothing else in the town says
+       "this is a real junction" as immediately, and the lamp that is lit runs
+       off the BAR — so the city's own signals are on the beat, which is the
+       joke the whole game is built on. */
+    if(!lineIsMain(i) || !lineIsMain(j)) continue;
+    if(Math.hypot(X-ox, Z-oz) > 150) continue;
+    const phase = Math.floor(CITY.beat/4) % 3;         // one bar per aspect
+    for(const [sx2, sz2] of [[-1,-1],[1,1]]){
+      const px2 = X + sx2*(hwA + 1.2), pz2 = Z + sz2*(hwA + 1.2);
+      cityBox(px2, pz2, DECK_Y + 4.2, 0.18, 4.2, 0.18, 0.10, 0.10, 0.11, 0);
+      cityBox(px2, pz2, DECK_Y + 8.9, 0.34, 1.35, 0.34, 0.07, 0.07, 0.08, 0);
+      const LAMP = [[0.98,0.22,0.16],[0.99,0.72,0.20],[0.30,0.94,0.42]];
+      for(let k=0;k<3;k++)
+        citySph(px2 + nx*0.40, pz2 + nz*0.40, DECK_Y + 9.8 - k*0.9, 0.20,
+                LAMP[k][0], LAMP[k][1], LAMP[k][2], phase === k ? 1.3 : 0.06);
+    }
+  }
+}
+
+/* ── THE WHOLE TOWN, ONCE A FRAME ───────────────────────────────────────
+   Roads, then blocks, then lights, then signs — near to far in each pass, so
+   that if the instance buffer ever did fill it would drop the far detail
+   first. */
+function drawCity(beat, deckCol){
+  CITY.beat = beat;
+  CITY.yaw = -FRAME.camH;
+  CITY.sink = Game.sideMix*CITY_SINK;
+  CITY.deck = deckCol;
+  // Fully in the melody layer the town is 150 units under the deck and nothing
+  // of it can be on screen, so none of it is worth transforming.
+  if(Game.sideMix > 0.985) return;
+
+  const ox = FRAME.o.x, oz = FRAME.o.z, R = CITY.R;
+  const i0 = Math.floor((ox - R)/BLOCK), i1 = Math.ceil((ox + R)/BLOCK);
+  const j0 = Math.floor((oz - R)/BLOCK), j1 = Math.ceil((oz + R)/BLOCK);
+
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+    cityEdge(0, i, j, ox, oz);          // the road along Z at x = i·BLOCK
+    cityEdge(1, i, j, ox, oz);          // the road along X at z = j·BLOCK
+  }
+
+  /* THE BLOCKS. One cell of the lattice is one city block: four TERRACES set
+     back from the four streets around it, so every street is walled on both
+     sides by the blocks either side of it and no building has to know which
+     road it belongs to. The corners stay empty, which is what makes a junction
+     see-through in all four directions at once. */
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+    const bx = i*BLOCK + BLOCK/2, bz = j*BLOCK + BLOCK/2;
+    if(Math.hypot(bx-ox, bz-oz) > R + BLOCK) continue;
+    const D = districtOf(i, j);
+    for(let side=0; side<4; side++){
+      const along = side & 1;                          // 0: runs along Z, 1: along X
+      const sgn   = side < 2 ? -1 : 1;                 // outward, toward its street
+      /* SET BACK FROM ITS OWN STREET, not from the block. A single set-back
+         measured from the cell centre gives every street the same building
+         line, which means a one-lane alley ends up with a nine-metre pavement
+         on both sides and stops being an alley: the width changes and nothing
+         about the SPACE does. Measuring from the carriageway the terrace
+         actually faces is what puts the walls of an alley within reach and
+         leaves the boulevard its pavement. */
+      const fCls = along ? edgeCls(1, i, sgn < 0 ? j : j+1)
+                         : edgeCls(0, sgn < 0 ? i : i+1, j);
+      const pave = fCls === 1 ? 2.4 : fCls === 3 ? 4.8 : 7.6;
+      const mid  = halfRoad(fCls) + pave + 7.5;        // street centre -> wall centre
+      const line = along ? (sgn < 0 ? j : j+1)*BLOCK : (sgn < 0 ? i : i+1)*BLOCK;
+      CITY_FRAME.cx = along ? bx : line - sgn*mid;
+      CITY_FRAME.cz = along ? line - sgn*mid : bz;
+      CITY_FRAME.along = along; CITY_FRAME.sgn = sgn;
+      const d2 = Math.hypot(CITY_FRAME.cx-ox, CITY_FRAME.cz-oz);
+      if(d2 > R) continue;
+      const near = d2 < 135, mid2 = d2 < 215;
+      // The terrace's frontage, and the width of one building in it.
+      /* The frontage stops well short of the corners. That gap is what makes a
+         junction see-through in all four directions at once — which is the
+         property the whole lattice exists to provide, and a terrace that runs
+         to the corner quietly takes it away again. */
+      const run = BLOCK*0.52 + hash2(i*3.1, j*5.7 + side)*BLOCK*0.14;
+      const L1  = (run/FACE_N)*0.46;                   // half-length, with a gap
+      for(let k=0;k<FACE_N;k++){
+        const seed = i*7.13 + j*3.31 + side*1.77 + k*0.53;
+        const u0 = (k - (FACE_N-1)/2)*(run/FACE_N);
+        /* Roof height per BUILDING, from the district's range. A terrace whose
+           three houses agree is one building with lines drawn on it. */
+        const roof = D.hi[0] + hash2(seed*11.3, 2.7)*(D.hi[1]-D.hi[0]);
+        const h = (roof + 2)/1.5;
+        // Paintwork, jittered off the district so next door is somebody else's.
+        const tint = 0.82 + hash2(seed*5.9, 8.3)*0.42;
+        const w = [D.wall[0]*tint, D.wall[1]*tint, D.wall[2]*tint];
+        if(!mid2){                                     // far: a silhouette, nothing more
+          facePut(u0, 0, DECK_Y - 2 + h*0.5, L1, h, 7.5, w[0], w[1], w[2], 0);
+          continue;
+        }
+        const kind = D.mix[(hash2(seed*2.7, 4.1)*D.mix.length)|0];
+        FACES[kind](D, seed, u0, L1, h, w, near);
+      }
+    }
+  }
+
+  /* STREETLIGHTS, one pair per block face, and the pools they throw. These are
+     what give the asphalt a surface and the distance its perspective. The
+     bracket is on the boulevard side of the pole, and an alley gets a bare
+     bulb over a doorway instead of a lamp standard — a lamp post does not fit
+     in an alley, which is a nice accident of the geometry being honest. */
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+    const X = i*BLOCK, Z = j*BLOCK;
+    for(const [lx, lz, ax] of [[X, Z + BLOCK/2, false], [X + BLOCK/2, Z, true]]){
+      const dd = Math.hypot(lx-ox, lz-oz);
+      if(dd > R*0.72) continue;
+      const cls = ax ? edgeCls(1, i, j) : edgeCls(0, i, j);
+      const hw = halfRoad(cls), tall = cls === 1 ? 4.2 : 7.0;
+      for(const sg of [-1, 1]){
+        const px2 = ax ? lx : lx + sg*(hw + 1.6);
+        const pz2 = ax ? lz + sg*(hw + 1.6) : lz;
+        cityBox(px2, pz2, DECK_Y + tall*0.48, 0.16, tall, 0.16, 0.10, 0.09, 0.11, 0);
+        citySph(px2, pz2, DECK_Y + tall*0.94 - 0.3, 0.38, 1.0, 0.66, 0.28, 1.0);
+        if(dd < 200){
+          const qx = ax ? lx : lx + sg*(hw - 1.0);
+          const qz = ax ? lz + sg*(hw - 1.0) : lz;
+          cityBox(qx, qz, DECK_Y + 0.02, ax ? 2.6 : 1.7, 0.01, ax ? 1.7 : 2.6,
+                  0.52, 0.29, 0.11, 0.34);
+        }
+      }
+    }
+  }
+
+  citySigns(ox, oz, i0, i1, j0, j1);
+}
+
 /* ── resize ────────────────────────────────────────────────────────────── */
 let W=1,H=1;
 function resize(){
@@ -3458,12 +4429,17 @@ function frame(now){
      the lane you are in stops existing. Pull in rather than dropping the player
      off an edge that was legal a beat ago — being forced sideways by the street
      is the read, not a punishment. */
-  if(!Game.down()){
+  /* NOT IN THE MELODY LAYER. There the lane is a PITCH and the road is
+     something you are flying over, so letting a one-lane alley pull you to
+     lane 2 would take four fifths of the instrument away for a street you are
+     not even on. It never mattered while the narrowest thing in the game was a
+     three-lane node; with alleys it silences the melody layer outright. */
+  if(!Game.down() && !Game.inMelody){
     const sp = laneSpanAt(beat);
     if(Game.lane < sp.lo || Game.lane > sp.hi){
       Game.lane = Math.max(sp.lo, Math.min(sp.hi, Game.lane));
       Game.slide = 0;
-      judge('SIDE STREET', '#4fd4e4');
+      judge(CLS_NAME[streetClsAt(beat)] || 'SIDE STREET', '#4fd4e4');
     }
   }
 
@@ -3723,151 +4699,24 @@ function frame(now){
      This used to draw the road you were on and hang crossings off it, which
      is why the town only existed where you were standing: turn twice and the
      streets you turned off stopped being there, because nothing ever asked
-     the city what was around — it only asked the route where it went. One
-     road in sight, and a turn was a promise about geometry that did not exist
-     yet.
+     the city what was around — it only asked the route where it went.
 
-     So the city is a LATTICE now, drawn from the world rather than from your
-     path. Streets on every line of a fixed grid, blocks of building filling
-     the squares between them, all of it within a radius of wherever you
-     happen to be. The route is demoted to one sentence: which line am I on,
-     and which way am I pointing.
-
-     Three things fall out of that, and they are the reasons to do it:
-       · every road is on screen at once, so a turn is a choice between things
-         you can already see rather than a leap into fog;
-       · turning becomes a ROTATION onto a street that was always there, which
-         is why it can happen in the moment instead of being committed 16
-         beats early so the geometry has time to be built;
-       · the streets you have already driven are still behind you, because
-         they were never yours in the first place.
+     So the city is a LATTICE, drawn from the world rather than from your path.
+     Streets on every line of a fixed grid, blocks of building filling the
+     squares between them, all of it within a radius of wherever you happen to
+     be. The route is demoted to one sentence: which line am I on, and which
+     way am I pointing.
 
      BLOCK is 160 units — 8 beats, two bars. Every node length in NODES_STREET
      (8 bars = 640, 6 bars = 480) is a whole number of blocks, so the path can
      never come off the lattice, and the start (0,0) heading -Z is a grid line
-     by construction. That is not a coincidence to be maintained by hand: if a
-     node length stops dividing by 160 the roads and the road you drive part
-     company, which is worth knowing. */
-  if(TRACK.world === 'street'){
-    const ox = FRAME.o.x, oz = FRAME.o.z, R = 340;
-    const HALFR = LANE_W*LANES/2 + 0.9;              // half a carriageway
-    const i0 = Math.floor((ox - R)/BLOCK), i1 = Math.ceil((ox + R)/BLOCK);
-    const j0 = Math.floor((oz - R)/BLOCK), j1 = Math.ceil((oz + R)/BLOCK);
-    // A road along +Z is heading 0; a road along +X is heading a quarter turn.
-    const yawZ = -FRAME.camH, yawX = Math.PI/2 - FRAME.camH;
-    const hash = (a2, b2) => { const x = Math.sin(a2*127.1 + b2*311.7)*43758.5453; return x - Math.floor(x); };
+     by construction. If a node length stops dividing by 160 the roads and the
+     road you drive part company, which is worth knowing.
 
-    /* THE CARRIAGEWAYS. Stepped coarser with distance — the near ones are
-       doing the perspective work and the far ones are a line on the horizon —
-       which is what keeps a whole city inside one instance buffer. */
-    for(let i=i0;i<=i1;i++){
-      const X = i*BLOCK;
-      for(let z = oz - R; z <= oz + R; ){
-        const dd = Math.hypot(X-ox, z-oz);
-        const step = dd < 70 ? 6 : dd < 170 ? 12 : 24;
-        if(dd <= R){
-          viewInto(X, z, FRAME.o, FRAME.ch, FRAME.sh, VW);
-          if(VW.z < 30 && VW.z > -352){
-            pushInst(MESH_BOX, VW.x, DECK_Y-0.2, VW.z, HALFR, 0.22, step*0.52,
-                     DECK[0], DECK[1], DECK[2], 0,0, 0, yawZ);
-            if(dd < 170)
-              pushInst(MESH_BOX, VW.x, DECK_Y+0.03, VW.z, 0.055, 0.03, 1.5,
-                       DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yawZ);
-          }
-        }
-        z += step;
-      }
-    }
-    for(let j=j0;j<=j1;j++){
-      const Z = j*BLOCK;
-      for(let x = ox - R; x <= ox + R; ){
-        const dd = Math.hypot(x-ox, Z-oz);
-        const step = dd < 70 ? 6 : dd < 170 ? 12 : 24;
-        if(dd <= R){
-          viewInto(x, Z, FRAME.o, FRAME.ch, FRAME.sh, VW);
-          if(VW.z < 30 && VW.z > -352){
-            pushInst(MESH_BOX, VW.x, DECK_Y-0.2, VW.z, HALFR, 0.22, step*0.52,
-                     DECK[0], DECK[1], DECK[2], 0,0, 0, yawX);
-            if(dd < 170)
-              pushInst(MESH_BOX, VW.x, DECK_Y+0.03, VW.z, 0.055, 0.03, 1.5,
-                       DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yawX);
-          }
-        }
-        x += step;
-      }
-    }
-
-    /* THE BLOCKS. One cell of the lattice is one city block: four slabs of
-       tenement set back from the four streets around it, so every street in
-       the city is walled on both sides by the blocks either side of it and no
-       building has to know which road it belongs to. Hashed off the cell
-       index, so a block is the same block every time you come back to it —
-       which is the whole point of a city you can explore.
-
-       The corners are left empty, which is what makes a junction see-through
-       in all four directions at once. */
-    const SET = HALFR + 7;                            // kerb to building line
-    for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
-      const bx = i*BLOCK + BLOCK/2, bz = j*BLOCK + BLOCK/2;   // cell centre
-      if(Math.hypot(bx-ox, bz-oz) > R + BLOCK) continue;
-      for(let side=0; side<4; side++){
-        const along = side & 1;                        // 0: runs along Z, 1: along X
-        const sgn   = side < 2 ? -1 : 1;
-        const h  = 15 + hash(i*7+j, side)*30;
-        const len = BLOCK*0.30 + hash(i, j*3+side)*BLOCK*0.10;
-        const wx = along ? bx + sgn*0 : bx + sgn*(BLOCK/2 - SET);
-        const wz = along ? bz + sgn*(BLOCK/2 - SET) : bz;
-        const sink = Game.sideMix*(h + 12);
-        viewInto(wx, wz, FRAME.o, FRAME.ch, FRAME.sh, VW);
-        if(VW.z > 30 || VW.z < -352) continue;
-        const warm = 0.06 + hash(j, i+side)*0.05;
-        pushInst(MESH_BOX, VW.x, DECK_Y - 2 + h*0.5 - sink, VW.z,
-                 along ? len : 7.5, h, along ? 7.5 : len,
-                 0.055 + warm*0.55, 0.048 + warm*0.34, 0.070 + warm*0.30,
-                 0,0, 0, along ? yawZ : yawZ);
-        // windows: a couple per face, lit on the same hash
-        for(let w=0; w<3; w++){
-          if(hash(i*13+j, side*5+w) < 0.45) continue;
-          const wy = DECK_Y + 3 + w*(h/3.6);
-          if(wy > DECK_Y - 2 + h - 2) continue;
-          const jx = (hash(i, w+side)-0.5)*len*0.7;
-          viewInto(wx + (along ? jx : -sgn*3.9), wz + (along ? -sgn*3.9 : jx),
-                   FRAME.o, FRAME.ch, FRAME.sh, VW);
-          pushInst(MESH_BOX, VW.x, wy - sink, VW.z, 0.9, 0.7, 0.9,
-                   1.0, 0.80, 0.42, 0,0, 0.75);
-        }
-      }
-    }
-
-    /* STREETLIGHTS, one pair per block face, and the pools they throw. These
-       are what give the asphalt a surface and the distance its perspective. */
-    for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
-      const X = i*BLOCK, Z = j*BLOCK;
-      for(const [lx, lz] of [[X, Z + BLOCK/2], [X + BLOCK/2, Z]]){
-        const dd = Math.hypot(lx-ox, lz-oz);
-        if(dd > R) continue;
-        const alongX = (lx !== X);
-        for(const sg of [-1, 1]){
-          const px2 = alongX ? lx : lx + sg*(HALFR + 1.6);
-          const pz2 = alongX ? lz + sg*(HALFR + 1.6) : lz;
-          const sink = Game.sideMix*19;
-          viewInto(px2, pz2, FRAME.o, FRAME.ch, FRAME.sh, VW);
-          if(VW.z > 30 || VW.z < -352) continue;
-          pushInst(MESH_BOX, VW.x, DECK_Y + 3.4 - sink, VW.z, 0.16, 7.0, 0.16,
-                   0.10,0.09,0.11, 0,0, 0, yawZ);
-          pushInst(MESH_SPH, VW.x, DECK_Y + 6.6 - sink, VW.z, 0.40, 0.26, 0.40,
-                   1.0,0.66,0.28, 0,0, 1.0);
-          if(dd < 200){
-            const qx = alongX ? lx : lx + sg*(HALFR - 1.0);
-            const qz = alongX ? lz + sg*(HALFR - 1.0) : lz;
-            viewInto(qx, qz, FRAME.o, FRAME.ch, FRAME.sh, VW);
-            pushInst(MESH_BOX, VW.x, DECK_Y + 0.02, VW.z, 1.7, 0.01, 2.6,
-                     0.52,0.29,0.11, 0,0, 0.34, alongX ? yawX : yawZ);
-          }
-        }
-      }
-    }
-  }
+     The town itself — widths, districts, archetypes, signs — lives in
+     drawCity() above, because it grew to five hundred lines and none of them
+     are about this frame. */
+  if(TRACK.world === 'street') drawCity(beat, DECK);
 
   /* ── junction: the fork made visible ──────────────────────────────
      Angled rails peeling off both outer edges, lit while the window is open.
@@ -4178,7 +5027,10 @@ function frame(now){
     ? (bj ? (padsOn ? '◄ PRESS OUT AT AN EDGE TO FORK ►'
                     : TOUCH ? '◄ SWIPE OUT AT AN EDGE TO FORK ►'
                    : '◄ lane 0 + LEFT = melody          ·          lane 4 + RIGHT = arrangement ►')
-          : TRACK_NAME + '  ·  ' + sec.name
+          : TRACK_NAME + '  ·  ' + (TRACK.grid && !Game.inMelody
+                                      ? districtAtInto(FRAME.o).name + '  ·  '
+                                        + CLS_NAME[streetClsAt(beat)]
+                                      : sec.name)
             + (Game.inMelody
                  ? (padsOn ? '  ·  ↑ ↓ = pitch  ·  double tap = arrangement'
                           : TOUCH ? '  ·  swipe ↑ ↓ = pitch  ·  double tap = arrangement'
