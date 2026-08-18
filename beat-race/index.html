@@ -156,7 +156,8 @@
 <div id="thint">
   <div class="r"><b>&#8596;</b>swipe to move</div>
   <div class="r"><b>&#8593;</b>swipe up to jump</div>
-  <div class="r"><b>&#8595;</b>swipe down for side view</div>
+  <div class="r"><b>&#8595;</b>swipe down in side view</div>
+  <div class="r"><b>&#8226;&#8226;</b>double tap to switch view</div>
 </div>
 <div id="auto"><i></i>Autoride &nbsp;·&nbsp; arrow key to take over</div>
 <div id="judge"></div>
@@ -2173,19 +2174,30 @@ document.getElementById('pausebtn').addEventListener('click', e=>{
 /* ── TOUCH — four gestures, and that is the whole phone build ────────────
      swipe ← →   move (a lane in chase view, a pitch in side view)
      swipe ↑     jump
-     swipe ↓     switch view
+     swipe ↓     down the staff — side view only
+     double tap  switch view
 
    Left/right drives the slot in BOTH layers. The five slots are laid out
    vertically in side view, so mapping them to a horizontal swipe is technically
-   a mismatch — but the alternative is a fifth gesture, and the whole point of
-   this scheme is that there are only ever four. Right is up the neck, left is
-   down it, which is the fret order you already read left-to-right on the deck.
+   a mismatch — but the alternative is a fifth swipe direction, and right is up
+   the neck, left is down it, which is the fret order you already read
+   left-to-right on the deck.
 
-   Tap no longer switches the layer: swipe-down owns that now, and leaving tap
-   bound as well meant every mistimed swipe toggled the camera. */
-let tsx=0, tsy=0, tsw=false;
+   Swipe-down USED to switch the view, and that was the wrong verb on the wrong
+   axis: in side view the slots run vertically, so the one gesture that means
+   "go down" to every player alive was spent on the camera instead. Down now
+   moves down the staff where that reads (side view) and is inert in chase view,
+   where there is nothing below you. The view moved to a double tap: it is a
+   mode switch, it happens twice a song, and a tap cannot collide with a swipe
+   the way two meanings on one axis did. A single tap stays unbound so a
+   mistimed swipe never toggles the camera. */
+let tsx=0, tsy=0, tsw=false, tst=0, lastTap=0, lastTapX=0, lastTapY=0;
+// A tap that lands on a control (pause, its overlay, the start gate) belongs to
+// that control, not to the game.
+const onUI = t => !!(t && t.closest && t.closest('#pausebtn,#pause,#gate,#auto'));
 addEventListener('touchstart', e=>{ const t=e.changedTouches[0];
-  tsx=t.clientX; tsy=t.clientY; tsw=false; hideTouchHint(); }, {passive:true});
+  tsx=t.clientX; tsy=t.clientY; tsw=false; tst=performance.now();
+  hideTouchHint(); }, {passive:true});
 addEventListener('touchmove', e=>{
   if(tsw || Clock.paused) return;
   const t=e.changedTouches[0], dx=t.clientX-tsx, dy=t.clientY-tsy;
@@ -2194,7 +2206,24 @@ addEventListener('touchmove', e=>{
   if(Game.auto){ Game.auto = false; judge('AUTORIDE OFF', '#7f97a8'); }
   if(Math.abs(dx) > Math.abs(dy)) Game.tryLane(dx>0 ? 1 : -1);   // move / pitch
   else if(dy < 0) Game.jump();                                   // up = jump
-  else Game.toggleLayer();                                       // down = switch view
+  else if(Game.inMelody){                                        // down the staff
+    // Same verb the keyboard's DOWN has in the melody layer, octave drop and all.
+    if(Game.lane <= 0 && Game.octUp){ Game.octUp = false; judge('OCTAVE \u25bc','#4fd4e4'); }
+    else Game.tryLane(-1);
+  }
+}, {passive:true});
+addEventListener('touchend', e=>{
+  if(tsw || Clock.paused || onUI(e.target)) return;
+  const t = e.changedTouches[0], now = performance.now();
+  if(now - tst > 300) return;                       // a press, not a tap
+  if(now - lastTap < 320 &&
+     Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 60){
+    lastTap = 0;
+    if(Game.auto){ Game.auto = false; judge('AUTORIDE OFF', '#7f97a8'); }
+    Game.toggleLayer();                             // double tap = switch view
+  } else {
+    lastTap = now; lastTapX = t.clientX; lastTapY = t.clientY;
+  }
 }, {passive:true});
 
 /* The hint arms itself when the run starts and takes itself down after five
@@ -2675,15 +2704,23 @@ function frame(now){
       /* A low bar across the whole road. Drawn exactly as wide as it hits
          (fairness rule 1), so it takes the local road width — narrower on a
          three-lane side street. Low and solid rather than tall and framed, so
-         it never reads as something you might steer around: the answer is up. */
+         it never reads as something you might steer around: the answer is up.
+
+         It carries lane:-1 as a "spans every lane" sentinel, so it must NOT be
+         placed through laneX() the way a note is — that pushed the bar three
+         lane-widths to the left of the road, hanging off the deck. Like the
+         gate, it sits on the road centre and, in the melody view, at the middle
+         of the staff. */
+      const hx  = centerX(e.beat);
+      const hy  = DECK_Y + ((altY(2) - 0.7) - DECK_Y)*mm;
       const hhw = deckHalfW(e.beat);
       const nearh = Math.max(0, 1 - Math.abs(dz)/150);
-      pushInst(MESH_BOX, ex, baseY+0.52, z, hhw+0.6, 0.34, 0.42,
+      pushInst(MESH_BOX, hx, hy+0.52, z, hhw+0.6, 0.34, 0.42,
                0.10,0.07,0.07, 0,0, 0);
-      pushInst(MESH_BOX, ex, baseY+0.88, z, hhw+0.6, 0.07, 0.30,
+      pushInst(MESH_BOX, hx, hy+0.88, z, hhw+0.6, 0.07, 0.30,
                0.95,0.42,0.16, 0,0, 0.55 + 0.45*nearh);
       for(let k=-2;k<=2;k++)                      // hazard stripes
-        pushInst(MESH_BOX, ex + k*(hhw*0.42), baseY+0.52, z+0.05, 0.22, 0.30, 0.10,
+        pushInst(MESH_BOX, hx + k*(hhw*0.42), hy+0.52, z+0.05, 0.22, 0.30, 0.10,
                  0.96,0.72,0.20, 0,0, 0.30 + 0.30*nearh);
     } else if(e.t === 'jump'){
       /* A gate hits you in EVERY lane, so it must be unmissable. It used to be
@@ -2852,8 +2889,10 @@ function frame(now){
     ? (bj ? (TOUCH ? '◄ SWIPE OUT AT AN EDGE TO FORK ►'
                    : '◄ lane 0 + LEFT = melody          ·          lane 4 + RIGHT = arrangement ►')
           : TRACK_NAME + '  ·  ' + sec.name
-            + (Game.inMelody ? '  ·  ↑↓ = pitch  ·  again at the ends = octave'
-                             : (Game.mult > 1 ? '  ·  ×' + Game.mult : '')))
+            + (Game.inMelody
+                 ? (TOUCH ? '  ·  swipe ← → or ↓ = pitch  ·  double tap = arrangement'
+                          : '  ·  ↑↓ = pitch  ·  again at the ends = octave')
+                 : (Game.mult > 1 ? '  ·  ×' + Game.mult : '')))
     : '';
   const bi = ((Math.floor(beat)%4)+4)%4;
   for(let i=0;i<4;i++)
