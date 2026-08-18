@@ -2084,6 +2084,28 @@ const SOUL_BASS4 = [
    The same line four times a minute is wallpaper. */
 const HORN_RIFF = [[8,14,0.11],[10,12,0.088],[11,14,0.080],[12,16,0.135],[15,14,0.095]];
 
+/* ══ ATLANTICA'S FOUR BARS ════════════════════════════════════════════
+   Same disease the Soul Town bed had, and the same cure. Everything in the
+   house bed was one bar repeated: kick on every quarter, hats on a fixed
+   pattern, and a bass that played the ROOT on all four offbeats and nothing
+   else. The only thing that ever changed was the root, once a bar, on a
+   four-bar cycle — which at 126bpm is a loop that comes round every 7.6
+   seconds, exactly the "repeats after ten seconds" it sounded like.
+
+   The kick stays four-to-the-floor. That is not a lack of variety, it is the
+   genre, and a house track whose kick wanders is not a house track. The
+   variety goes where house actually keeps it: in the bassline, in the hats,
+   and in the eight- and sixteen-bar architecture on top. */
+const WATER_BASS4 = [
+  [[2,0],[6,0],[10,0],[14,0]],          // the plain offbeat pulse — the anchor
+  [[2,0],[6,0],[10,5],[14,0]],          // an octave thrown in
+  [[2,0],[5,0],[10,0],[13,3]],          // syncopated off the 16ths
+  [[2,0],[6,3],[10,0],[14,5]]           // climbing out of the four
+];
+/* EXTRA OPEN HATS per bar, on top of the offbeat 8ths every bar already has.
+   A hat pattern that never opens anywhere else is a click track with a hiss. */
+const WATER_HAT = [[], [7], [11], [7, 15]];
+
 /* WHICH OFFBEAT THE GUITAR SITS OUT, per bar of the four. A chank on all four
    offbeats of every bar is a metronome with a chord on it; one hole a bar, in
    a different place each bar, is a player. */
@@ -2538,7 +2560,14 @@ const Clock = {
 
   bedWater(step, t){
     const s16 = step % 16, bar = Math.floor(step/16);
-    const root = ROOTS[bar % 4];
+    const b4 = ((bar % 4) + 4) % 4, b8 = ((bar % 8) + 8) % 8, b16 = ((bar % 16) + 16) % 16;
+    const root = ROOTS[b4];
+    /* THE SIXTEENTH BAR IS A LIFT. The bass drops out for one bar and the hats
+       open up — the oldest arrangement move in house, and the one that makes
+       the sixteen-bar frame audible. Without it the only structure you can
+       hear is the four-bar chord cycle, and four bars is not a structure, it
+       is a loop. */
+    const lift = (b16 === 15);
     const c = this.ctx, D = this.duck;
 
     /* ── THE FLOOR ───────────────────────────────────────────────────
@@ -2613,17 +2642,21 @@ const Clock = {
       sn.connect(sg2).connect(K); sn.start(t); sn.stop(t + 0.20);
     }
 
-    // OPEN HAT on the offbeat 8ths — the "tss" that makes it move.
-    if(s16 % 4 === 2) this.noise(t, 0.070, 8200, 'highpass', 0.15, K);
+    // OPEN HAT on the offbeat 8ths — the "tss" that makes it move — plus the
+    // bar's own extra openings, so no two bars of the four hiss alike.
+    if(s16 % 4 === 2 || WATER_HAT[b4].indexOf(s16) >= 0)
+      this.noise(t, lift ? 0.115 : 0.070, 8200, 'highpass', lift ? 0.20 : 0.15, K);
     // CLOSED HAT / shaker on the 16ths between, for forward motion.
-    else if(s16 % 2 === 1) this.noise(t, 0.014, 9500, 'highpass', 0.075, K);
+    else if(s16 % 2 === 1) this.noise(t, 0.014, 9500, 'highpass', lift ? 0.10 : 0.075, K);
 
     /* OFFBEAT BASS — lands in the holes the kick leaves, which is the other half
        of why house moves. Root note of the bar, so it never fights the lead:
        the lead is pentatonic over the same root. */
-    if(s16 % 4 === 2){
+    let bassDeg = -1;
+    for(const [ss, dd] of WATER_BASS4[b4]) if(ss === s16) bassDeg = root + dd;
+    if(bassDeg >= 0 && !lift){
       const o = c.createOscillator(), g = c.createGain(), lp = c.createBiquadFilter();
-      const bf = p(root) / 2;
+      const bf = p(bassDeg) / 2;
       o.type = 'sawtooth'; o.frequency.value = bf;
       lp.type = 'lowpass'; lp.Q.value = 6;
       lp.frequency.setValueAtTime(bf*7, t);
@@ -2635,6 +2668,14 @@ const Clock = {
       o.start(t); o.stop(t + 0.26);
     }
 
+    /* THE EIGHT-BAR FILL. A clap roll climbing through the last beat, so the
+       phrase has a seam you can hear. Without one the bed has no landmarks at
+       all and every bar is the same bar. */
+    if(b8 === 7 && s16 >= 12){
+      const u = (s16 - 12)/3;
+      this.noise(t, 0.040, 1700 + u*1100, 'bandpass', 0.14 + u*0.22, K);
+      this.noise(t + 0.005, 0.025, 3400, 'highpass', 0.05 + u*0.09, K);
+    }
     // ALIEN CHOIR — one long morphing vowel every 4 bars, low in the mix.
     // Atlantica singing to itself.
     if(s16===0 && bar % 4 === 0){
