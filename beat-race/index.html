@@ -1346,7 +1346,7 @@ function laneSpanAt(b){
    The camera is what smooths it — see CAM_TURN below — because the geometry
    snapping is correct and the VIEW snapping is not. */
 const TURN_B = 0;                                // no arc: streets meet square
-const CROSS_W = 52;                              // how far a side street is drawn
+const CROSS_W = 300;                             // a side street is a STREET, not a stub
 const fwdX = h => Math.sin(h), fwdZ = h => -Math.cos(h);
 const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
 
@@ -3666,15 +3666,36 @@ function frame(now){
       if(ahead > 330 || ahead < -30) continue;
       const xhw = deckHalfW(rb);
       const nearX = Math.max(0, 1 - ahead/330);
-      for(let lat = -CROSS_W; lat <= CROSS_W; lat += 6){
-        if(Math.abs(lat) < xhw + 1) continue;              // the main road is here
-        const P = place(rb, lat);
-        const yw = P.yaw + Math.PI/2;                      // square to the CROSS street
-        pushInst(MESH_BOX, P.x, DECK_Y-0.2, P.z, xhw+0.9, 0.22, 2.9,
-                 DECK[0], DECK[1], DECK[2], 0,0, 0, yw);
-        // centre line down the crossing, so its direction reads at distance
-        pushInst(MESH_BOX, P.x, DECK_Y+0.03, P.z, 0.055, 0.03, 1.5,
-                 DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yw);
+      /* BOTH SIDE STREETS ARE DRAWN AS STREETS, all the way out to the fog.
+         They used to stop 52 units either side, which made an intersection
+         read as a widening rather than as a junction: you could see that the
+         road got fatter here, not that two more roads left from it. A turn you
+         cannot see the destination of is not a choice.
+
+         The step coarsens with distance — 6 units near the junction where the
+         perspective is doing real work, 18 far out where it is a line of dots
+         on the horizon — because a side street at a constant 6 costs 100
+         instances per junction per side and there are several junctions in
+         range at once. */
+      for(const sd of [-1, 1]){
+        for(let lat = xhw + 1, step = 6; lat <= CROSS_W; lat += step){
+          step = lat < 60 ? 6 : lat < 150 ? 10 : 18;
+          const P = place(rb, sd*lat);
+          const yw = P.yaw + Math.PI/2;                    // square to the CROSS street
+          const fade = Math.max(0, 1 - lat/CROSS_W);
+          pushInst(MESH_BOX, P.x, DECK_Y-0.2, P.z, xhw+0.9, 0.22, step*0.5,
+                   DECK[0], DECK[1], DECK[2], 0,0, 0, yw);
+          if(lat < 150)
+            pushInst(MESH_BOX, P.x, DECK_Y+0.03, P.z, 0.055, 0.03, 1.5,
+                     DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yw);
+          // A lamp every so often down the side street: without them it is a
+          // grey ribbon, and with them it is somewhere you could go.
+          if(lat > 20 && Math.round(lat) % 44 < step){
+            const Q = place(rb + 0.42*sd, sd*lat);
+            pushInst(MESH_SPH, Q.x, DECK_Y + 6.6, Q.z, 0.40, 0.26, 0.40,
+                     1.0,0.66,0.28, 0,0, 0.9*fade + 0.1);
+          }
+        }
       }
       // A lamp on each far corner of the crossing — the thing that actually
       // catches your eye from four blocks back.
@@ -3712,7 +3733,11 @@ function frame(now){
          junction — which is also what tells you an intersection is coming. */
       let toCorner = 1e9;
       for(const r of ROUTE) toCorner = Math.min(toCorner, Math.abs(bb - r.startBeat));
-      const open4 = toCorner < 1.9;
+      /* The clear zone has to be wider than the side street, not equal to it:
+         the tenements flanking the junction are what you look PAST to see
+         where the crossing goes, so anything inside a block's width of the
+         corner has to be absent rather than merely set back. */
+      const open4 = toCorner < 3.1;
       for(const sx of [-1,1]){
         const side = sx < 0 ? 0 : 1;
         // Set back from the kerb, and never so tall near the camera that it
