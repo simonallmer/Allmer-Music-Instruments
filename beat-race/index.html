@@ -3560,7 +3560,15 @@ function frame(now){
   // over the side hides the very thing you need to see happen.
   const camLane = Math.max(0, Math.min(LANES-1, Game.laneVis));
   const camY = Game.down() ? DECK_Y + 0.95 : py;
-  const chaseEye=[cx0 + laneX(camLane)*0.45, camY+8.4+bob, PLAYER_Z+29];
+  /* THE CAMERA RIDES THE ROAD BEHIND YOU, not a fixed point 29 units back in
+     view space. Those are the same thing on a straight and very different
+     ones at a corner: a fixed offset keeps pointing back down the street you
+     have just left, so as you turn it swings wide, off the carriageway, and
+     straight through whatever block is on the corner. Putting the eye at the
+     path point 1.45 beats behind means it takes the corner too — it is on the
+     road, because it is literally where you were. */
+  const BACK = place(beat - 29/UPB, laneX(camLane)*0.45);
+  const chaseEye=[BACK.x, camY+8.4+bob, BACK.z];
   const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, AHEAD.z];
 
   /* SIDE VIEW. Looking along -X, so world -Z becomes screen-right: the track
