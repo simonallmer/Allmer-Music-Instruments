@@ -232,10 +232,10 @@
       <input id="vol" type="range" min="0" max="100" step="1" value="80">
       <span id="vol_v">80</span>
     </div>
+    <div class="k">Resume</div>
     <div class="k" id="padbtn">On-screen arrows: On</div>
     <div class="k" id="autobtn">Autoride</div>
     <div class="k" id="menubtn">Back to menu</div>
-    <div class="k">Resume</div>
     <div class="hint">Esc or P &nbsp;·&nbsp; M to mute &nbsp;·&nbsp; R autoride</div>
   </div>
 </div>
@@ -1220,7 +1220,11 @@ function pushNode(key, choice){
      a corridor track spends it on the lateral weave it always had. Neither
      knows about the other. */
   const grid = !!TRACK.grid;
-  const turn = grid ? (choice==='L' ? -1 : choice==='R' ? 1 : 0) : 0;
+  /* A grid block is always pushed STRAIGHT AHEAD. The road ahead of you is the
+     one you are on until you decide otherwise, and you decide at the crossing
+     — see Game.takeTurn(). The fork choice still picks what MUSIC the next
+     block plays; it no longer picks which way the street goes. */
+  const turn = 0;
   const cx = grid ? 0
     : (prev ? prev.cx : 0) + (choice==='L' ? -CURVE_W : choice==='R' ? CURVE_W : 0);
   const startBeat = routeEndBeat;
@@ -1347,6 +1351,7 @@ function laneSpanAt(b){
    snapping is correct and the VIEW snapping is not. */
 const TURN_B = 0;                                // no arc: streets meet square
 const BLOCK = 160;   // city grid spacing: 8 beats, two bars, at UPB 20
+const TURN_WIN = 0.85;   // beats either side of a crossing that a turn lands
 const fwdX = h => Math.sin(h), fwdZ = h => -Math.cos(h);
 const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
 
@@ -2479,8 +2484,56 @@ const Game = {
     return null;
   },
 
+  /* ── TURNING, IN THE MOMENT ───────────────────────────────────────
+     Every street in the city is already drawn, so nothing has to be decided
+     in advance any more — which is what let this become instantaneous. A
+     block's heading is a single field, its start point is fixed by the block
+     before it, and the notes on it are addressed by BEAT and positioned
+     through the path. So turning is: set one number, recompute the block's
+     heading, and everything on that street — road, kerbs, orbs, hurdles —
+     is on the new street on the very next frame. Nothing is rebuilt and
+     nothing pops, because none of it was ever tied to a direction.
+
+     The window is short and centred on the crossing. Miss it and you have
+     simply carried straight on, which is the correct default and needs no
+     code at all: the block was already pushed straight. */
+  turnAt(b){
+    if(!TRACK.grid) return null;
+    for(let i=1;i<ROUTE.length;i++){
+      const e = ROUTE[i];
+      if(!e.turned && Math.abs(b - e.startBeat) <= TURN_WIN) return e;
+    }
+    return null;
+  },
+  takeTurn(dir){
+    const e = this.turnAt(Clock.songBeat());
+    if(!e) return false;
+    e.turn = dir; e.turned = true;
+    e.arc = arcEndOf(e);                       // one field, one recompute
+    /* Any block already pushed BEHIND this one was seeded from where this one
+       used to end, and it no longer ends there. Re-seed the tail or the road
+       tears open at the next boundary — validatePath() catches exactly this,
+       which is what it is for. */
+    for(let i = ROUTE.indexOf(e) + 1; i < ROUTE.length; i++){
+      /* endBeat is ALSO the next block's startBeat, and routeIndexAt() resolves
+         a tie forwards — so asking for the path at exactly that beat returns
+         the block we are trying to re-seed, reading back the stale value it
+         was supposed to replace. A hair earlier lands inside the block that
+         actually ends there. */
+      const q = ROUTE[i], from = pathInto(ROUTE[i-1].endBeat - 1e-6, PATH_C);
+      q.px = from.x; q.pz = from.z; q.h = from.h;
+      q.arc = arcEndOf(q);
+    }
+    judge(dir < 0 ? '◄ TURN' : 'TURN ►', '#e05ca8');
+    Clock.latch();
+    return true;
+  },
+
   tryLane(dir){
     if(this.dead || !Clock.started || Clock.paused) return;
+    // At a crossing, sideways means TURN — not change lane. Never in the
+    // melody layer, where sideways is a pitch.
+    if(!this.inMelody && this.takeTurn(dir)) return;
     const b = Clock.songBeat();
     const grid = Math.round(b*2)/2;               // nearest 8th
     const err = b - grid;                          // <0 early, >0 late
