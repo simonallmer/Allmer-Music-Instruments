@@ -1777,12 +1777,92 @@ const Clock = {
     const t=this.ctx.currentTime;
     this.noise(t,0.05,2400,'bandpass',0.20);
     this.noise(t+0.055,0.05,2100,'bandpass',0.13); },
-  // A clean vault. Short upward air noise — cheap, but without it a successful
-  // jump is silent and reads as nothing having happened.
-  whoosh(){ if(!this.started) return;
-    const t=this.ctx.currentTime;
-    this.noise(t, 0.16, 1400, 'bandpass', 0.13);
-    this.tone(t, 340, 'sine', 0.01, 0.16, 0.05, 3000); },
+  // Beat → audio time. The inverse of songBeat(), and the thing that lets an
+  // event be scheduled ON the grid rather than whenever a frame noticed it.
+  timeAt(b){ return this.timeAtChange + (b - this.beatAtChange)*this.spb(); },
+
+  /* ── THE VAULT ────────────────────────────────────────────────────
+     A hurdle is the one thing in this game you beat with your body instead of
+     your ear, and it used to be the one thing that made no music: a thin air
+     noise going up, silence coming down. That is backwards. The LANDING is the
+     impact, the impact happens on the grid, and anything that lands on the grid
+     in this piece should be part of the piece.
+
+     LAUNCH stays small on purpose. You jump constantly, and a big sound on
+     every take-off would trample the phrase it is supposed to sit inside. Air,
+     a rising body, nothing pitched clearly enough to argue with the lead.
+
+     THE LANDING is the event, and three things make it music rather than a
+     sound effect:
+
+       1. IT IS QUANTISED. Scheduled at the 8th nearest touch-down instead of at
+          the frame that noticed the clear, so it lands WITH the kit rather than
+          somewhere between two of its hits. This is the whole reason timeAt()
+          exists — the clear is detected in a frame, but the sound belongs to
+          the grid.
+       2. IT IS TUNED. A floor tom on the bar's own root, an octave under the
+          lead, carrying the same 808 pitch-drop the rest of the kit speaks. A
+          landing at an arbitrary pitch is a crash in somebody else's song.
+       3. IT PUMPS. The landing ducks the bed exactly the way the kick does,
+          which is what turns a loud noise into weight: the mix gets out of its
+          way for a moment, and the hole IS the impact.
+
+     A full-width GATE is the same event one size up — the tom doubled an octave
+     down, a longer darker crash, a deeper duck. It should sound like more,
+     because it took the same jump aimed at a bigger wall.
+
+     Deliberately NOT cancelScheduledValues() on the duck: the kick schedules
+     its own pump ~120ms ahead and this lands up to a beat ahead, so cancelling
+     would mean whichever got there second silently deleted the other's ramp.
+     Layering the two setValueAtTime events instead lets the later ramp simply
+     continue from wherever this one left the gain. */
+  launch(){ if(!this.started) return;
+    const t = this.ctx.currentTime;
+    this.noise(t, 0.14, 1600, 'highpass', 0.10, this.duck);
+    const o = this.ctx.createOscillator(), g = this.env(t, 0.02, 0.16, 0.09);
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(180, t);
+    o.frequency.exponentialRampToValueAtTime(430, t + 0.17);
+    o.connect(g).connect(this.duck);
+    o.start(t); o.stop(t + 0.22); },
+
+  vault(landBeat, big){
+    if(!this.started) return;
+    const c = this.ctx;
+    const gridB = Math.round(landBeat*2)/2;                  // onto the 8th
+    // Never in the past: a clear noticed late lands on the next grid line
+    // rather than immediately and out of time.
+    const t = Math.max(c.currentTime + 0.02, this.timeAt(gridB));
+    // max(0,…) before the modulo: a negative beat gives a negative bar index,
+    // ROOTS[-2] is undefined, and the NaN comes out the far end as a
+    // non-finite frequency rather than as anything that names itself.
+    const root = p(ROOTS[Math.max(0, Math.floor(gridB/4)) % 4]);
+    const tom = (freq, peak, dur) => {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(freq*2.6, t);
+      o.frequency.exponentialRampToValueAtTime(freq, t + dur*0.22);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(this.kickDrive);
+      o.start(t); o.stop(t + dur + 0.06);
+    };
+    tom(root, big ? 1.00 : 0.68, big ? 0.44 : 0.30);
+    if(big) tom(root/2, 0.62, 0.54);
+    // The transient. Without a click on the front this is a note, not an impact.
+    this.noise(t, 0.010, 2400, 'highpass', big ? 0.40 : 0.28, this.kickDrive);
+    // Debris rather than cymbal — dark and short, so it does not ring over the
+    // next phrase the way a crash would.
+    this.noise(t, big ? 0.40 : 0.22, big ? 3200 : 4600, 'highpass',
+               big ? 0.19 : 0.12, this.duck);
+    const D = this.duck, pump = Math.min(0.26, this.spb()*0.6);
+    D.gain.setValueAtTime(big ? 0.18 : 0.30, t);
+    D.gain.exponentialRampToValueAtTime(1.0, t + pump);
+    // The screen lands with the sound, on the same grid line, not on the frame
+    // that happened to notice the clear.
+    Game.landAt = gridB; Game.landBig = !!big;
+  },
   thud(){ if(!this.started) return;
     const t=this.ctx.currentTime, o=this.ctx.createOscillator(), g=this.env(t,0.005,0.45,0.8);
     o.type='square'; o.frequency.setValueAtTime(90,t);
@@ -1894,7 +1974,10 @@ const Game = {
 
   jump(){ if(this.dead||!Clock.started||Clock.paused) return;
     const b=Clock.songBeat(); if(b - this.jumpAt < 0.9) return;
-    this.jumpAt = b; Clock.noise(Clock.ctx.currentTime, 0.10, 900, 'highpass', 0.12); },
+    this.jumpAt = b; Clock.launch(); },
+  // Set by Clock.vault() to the grid line the landing was scheduled on, so the
+  // shake fires with the tom instead of a frame or two either side of it.
+  landAt:-99, landBig:false,
 
   /* ── AUTORIDE ─────────────────────────────────────────────────────────
      R drives the line perfectly. Any arrow takes the wheel back.
@@ -2664,10 +2747,11 @@ function frame(now){
     } else if(e.t === 'jump'){
       // spans every lane, so no lane test — but it must be visibly a wall
       if(!Game.jumping(beat)) Game.hit('HIT — GATE');
+      else { e.cleared = true; Clock.vault(Game.jumpAt + 0.9, true); judge('VAULT', '#4fd4e4'); }
       e.done = true;
     } else if(e.t === 'hurdle'){
       if(!Game.jumping(beat)) Game.clip();
-      else { e.cleared = true; Clock.whoosh(); }
+      else { e.cleared = true; Clock.vault(Game.jumpAt + 0.9, false); }
       e.done = true;
     }
   }
@@ -2704,6 +2788,12 @@ function frame(now){
   Game.flowIntensity += (Math.min(Game.flowChain/8,1) - Game.flowIntensity) * Math.min(1, dt*4);
   Game.shake = Math.max(0, Game.shake - dt*3.2);
   Game.hitFlash = Math.max(0, Game.hitFlash - dt*4.5);
+  // TOUCH-DOWN. Fired on the grid line the vault was scheduled on, so the kick
+  // in the screen and the tom in the speakers are the same event.
+  if(Game.landAt > -90 && beat >= Game.landAt){
+    Game.shake = Math.max(Game.shake, Game.landBig ? 0.55 : 0.30);
+    Game.landAt = -99;
+  }
 
   /* Entering a side street from an outer lane: the road narrows under you, so
      the lane you are in stops existing. Pull in rather than dropping the player
