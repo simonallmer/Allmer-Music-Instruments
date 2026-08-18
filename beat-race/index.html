@@ -1200,13 +1200,25 @@ function placeHurdles(ent, from, to){
 function pushNode(key, choice){
   const n = NODES[key];
   const prev = ROUTE[ROUTE.length-1];
-  const cx = (prev ? prev.cx : 0) + (choice==='L' ? -CURVE_W : choice==='R' ? CURVE_W : 0);
+  /* TWO WAYS TO CHANGE DIRECTION, and a track picks one. A grid track spends
+     the choice on a real quarter-turn and keeps its centreline offset at zero;
+     a corridor track spends it on the lateral weave it always had. Neither
+     knows about the other. */
+  const grid = !!TRACK.grid;
+  const turn = grid ? (choice==='L' ? -1 : choice==='R' ? 1 : 0) : 0;
+  const cx = grid ? 0
+    : (prev ? prev.cx : 0) + (choice==='L' ? -CURVE_W : choice==='R' ? CURVE_W : 0);
   const startBeat = routeEndBeat;
   const tier = densityTier();
+  // Where the previous block left us — position and heading both.
+  const from = prev ? pathInto(prev.endBeat, PATH_C) : null;
   const ent = { key, name:n.name, kind:n.kind, startBeat,
                 endBeat: startBeat + n.bars*4, cx, tier,
                 lanes: n.lanes || LANES,
+                turn, px: from ? from.x : 0, pz: from ? from.z : 0,
+                h: from ? from.h : 0,
                 junctionBeat: startBeat + n.bars*4 - JUNC_LEAD };
+  ent.arc = arcEndOf(ent);            // cached: seeds its own straight run
   ROUTE.push(ent);
   routeEndBeat = ent.endBeat;
 
@@ -1272,6 +1284,127 @@ function laneSpanAt(b){
   const n = Math.round(laneCountAt(b));
   const pad = Math.max(0, (LANES - n) >> 1);
   return { lo: pad, hi: LANES-1-pad };
+}
+
+/* ══ THE CITY IS A GRID ═══════════════════════════════════════════════
+   Everything above this line assumes the world is a CORRIDOR: the track runs
+   down -Z forever, `centerX(b)` slides it sideways, and the camera never turns
+   because it never has to. That model cannot express a corner. Bend a road
+   parameterised by z through 90° and it becomes parallel to the camera plane —
+   z stops increasing, and every object in the scene is stacked at one depth.
+
+   So the track becomes a PATH: a position and a heading per beat, walked in
+   world space, with lanes measured sideways from it. A block is a straight run
+   with an optional quarter-turn at its start, which makes the city a lattice —
+   turn left, turn right, or hold, at every intersection, in any of four
+   directions. Chess board, and you drive on the lines.
+
+   THE ARC. A turn is a real quarter circle, not a snap: TURN_B beats of arc at
+   a radius that falls out of the speed, so the corner is rounded at exactly the
+   rate you are travelling and the camera yaws through it by itself. At 20
+   units/beat and 1.5 beats that is a ~19-unit radius — a tight city corner on a
+   17-unit road, which is what turning off a main street into a side street
+   should feel like.
+
+   ATLANTICA DOES NOT USE ANY OF THIS. Its blocks all carry turn = 0, so the
+   path is a straight line down -Z and every formula below collapses to exactly
+   the arithmetic the corridor renderer already does. That is the property that
+   makes this safe to introduce: one track gets a grid, the other cannot tell
+   the difference.
+
+   Convention, fixed once and relied on everywhere:
+     heading h is radians, h = 0 points down -Z (the way you start)
+     forward(h) = ( sin h, -cos h)      right(h) = ( cos h,  sin h)
+   so positive h turns you toward +X, i.e. h grows to the RIGHT.            */
+const TURN_B = 1.5;                              // beats spent rounding a corner
+const TURN_L = TURN_B*UPB;                       // ...which is this far...
+const TURN_R = TURN_L/(Math.PI/2);               // ...at this radius.
+const fwdX = h => Math.sin(h), fwdZ = h => -Math.cos(h);
+const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
+
+/* Where a block's arc leaves you. Computed once when the block is pushed,
+   because it seeds both the straight run after it and the next block. */
+function arcEndOf(e){
+  if(!e.turn) return { x:e.px, z:e.pz, h:e.h };
+  const sg = Math.sign(e.turn), h = e.h + sg*(Math.PI/2);
+  const cx = e.px + rgtX(e.h)*TURN_R*sg, cz = e.pz + rgtZ(e.h)*TURN_R*sg;
+  return { x: cx - rgtX(h)*TURN_R*sg, z: cz - rgtZ(h)*TURN_R*sg, h };
+}
+/* The centreline at beat b, in WORLD space. Writes into `out` rather than
+   returning an object: the draw loops call this a few thousand times a frame
+   and a per-call allocation there is a garbage collector running during a
+   rhythm game. Two scratch records are provided below for callers that need
+   to hold two points at once. */
+function pathInto(b, out){
+  const e = ROUTE[routeIndexAt(b)];
+  const u = Math.max(0, (b - e.startBeat)*UPB);
+  if(e.turn && u < TURN_L){
+    const sg = Math.sign(e.turn), h = e.h + sg*(u/TURN_L)*(Math.PI/2);
+    const cx = e.px + rgtX(e.h)*TURN_R*sg, cz = e.pz + rgtZ(e.h)*TURN_R*sg;
+    out.x = cx - rgtX(h)*TURN_R*sg; out.z = cz - rgtZ(h)*TURN_R*sg; out.h = h;
+  } else {
+    const a = e.arc, d = e.turn ? u - TURN_L : u;
+    out.x = a.x + fwdX(a.h)*d; out.z = a.z + fwdZ(a.h)*d; out.h = a.h;
+  }
+  return out;
+}
+const PATH_A = {x:0,z:0,h:0}, PATH_B = {x:0,z:0,h:0}, PATH_C = {x:0,z:0,h:0};
+
+/* World position `lat` units to the right of the centreline at beat b. The
+   existing lateral weave rides along too, so Atlantica's forks still work
+   exactly as they did — on a grid track centerX() is flat and contributes
+   nothing. */
+function worldInto(b, lat, out){
+  pathInto(b, out);
+  const off = centerX(b) + lat;
+  out.x += rgtX(out.h)*off; out.z += rgtZ(out.h)*off;
+  return out;
+}
+
+/* THE PLAYER'S FRAME. The renderer draws in camera-relative coordinates —
+   player at z = PLAYER_Z, road running away down -Z — and that stays true no
+   matter which way you are actually facing in the city, because the whole
+   world is rotated into your heading before it is drawn. Keeps every existing
+   coordinate small and every existing constant meaningful.
+
+   `o` is the path point at the player, `ch`/`sh` its heading's cosine/sine.
+   Returns view x and z; the yaw a box needs to stay square to the road is
+   (world heading − player heading), handed back on out.yaw. */
+function viewInto(wx, wz, o, ch, sh, out){
+  const dx = wx - o.x, dz = wz - o.z;
+  out.x = dx*ch + dz*sh;                       // along the player's right
+  out.z = PLAYER_Z - (dx*sh - dz*ch);          // forward becomes -Z again
+  return out;
+}
+
+/* Self-check, in the spirit of validateCharts(): a path that is subtly wrong
+   does not look like a bug, it looks like the world drifting, which is the
+   least diagnosable failure a driving game has. Runs on demand. */
+function validatePath(){
+  const bad = [], A = {x:0,z:0,h:0}, B = {x:0,z:0,h:0};
+  // 1. blocks must join: the end of one is the start of the next, exactly.
+  for(let i=0;i<ROUTE.length-1;i++){
+    const e = ROUTE[i], n = ROUTE[i+1];
+    pathInto(e.endBeat - 1e-9, A);
+    if(Math.hypot(A.x-n.px, A.z-n.pz) > 0.02)
+      bad.push(`block ${i}->${i+1} jumps ${Math.hypot(A.x-n.px, A.z-n.pz).toFixed(3)} units`);
+    if(Math.abs(((A.h-n.h+Math.PI)%(2*Math.PI))-Math.PI) > 1e-3)
+      bad.push(`block ${i}->${i+1} heading jumps`);
+  }
+  // 2. unit speed everywhere, arcs included: UPB units of world per beat.
+  const b0 = ROUTE[0].startBeat, b1 = ROUTE[ROUTE.length-1].endBeat;
+  for(let b = b0; b < b1 - 0.05; b += 0.25){
+    pathInto(b, A); pathInto(b + 0.05, B);
+    const v = Math.hypot(B.x-A.x, B.z-A.z)/0.05;
+    if(Math.abs(v - UPB) > 0.6) bad.push(`speed ${v.toFixed(2)} at beat ${b.toFixed(2)} (want ${UPB})`);
+  }
+  // 3. the frame transform must put the player at the origin, facing -Z.
+  pathInto(b0 + 3, A);
+  viewInto(A.x, A.z, A, Math.cos(A.h), Math.sin(A.h), B);
+  if(Math.abs(B.x) > 1e-6 || Math.abs(B.z - PLAYER_Z) > 1e-6)
+    bad.push(`view frame origin is (${B.x}, ${B.z}), want (0, ${PLAYER_Z})`);
+  if(bad.length) console.error('PATH:\n' + bad.join('\n'));
+  return bad;
 }
 
 // Where the centreline WOULD go if you took side sx from this junction — the
@@ -1374,7 +1507,7 @@ const TRACKS = {
     name:'Soul Town', num:'Track 02', blurb:'One in the morning, downtown. Ride the backbeat — <b>the tambourine is the grid</b>. Same five frets, major key.',
     gears:[96,102,110,118], scale:PENT_MAJOR, roots:[0,4,1,3],
     names:['C','D','E','G','A'], nodes:NODES_STREET, start:'motorrow',
-    pal:PAL_STREET, world:'street', bed:'bedStreet',
+    pal:PAL_STREET, world:'street', bed:'bedStreet', grid:true,
     /* SLAP-BACK, not a hall. A single short repeat with almost no feedback is
        the tape delay every vocal of the period went through, and it is the
        other half of why this sounds like a record. */
