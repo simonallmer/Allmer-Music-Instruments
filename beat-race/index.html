@@ -3552,8 +3552,13 @@ function frame(now){
      one, and the road you were actually driving slid off to the far side of
      the frame. Measuring the turn rate and pulling the target in restores it:
      the camera follows the corner instead of arriving before it. */
+  /* Read BOTH components out as numbers here. place() hands back a shared
+     record — one allocation for a few thousand calls a frame — so the next
+     call to it overwrites this one. Holding `AHEAD` across the place() that
+     positions the camera below is what put the eye and the look-at on the
+     same point and turned the screen black. */
   const AHEAD = place(beat + 2.6, 0);
-  const aheadX = AHEAD.x;
+  const aheadX = AHEAD.x, aheadZ = AHEAD.z;
   // Pulled back for the racer build: you need to read rivals and spheres, not
   // just the next lane. Costs some detail up close; worth it.
   // While overboard the camera stays with the TRACK, not with you — chasing you
@@ -3568,8 +3573,9 @@ function frame(now){
      path point 1.45 beats behind means it takes the corner too — it is on the
      road, because it is literally where you were. */
   const BACK = place(beat - 29/UPB, laneX(camLane)*0.45);
-  const chaseEye=[BACK.x, camY+8.4+bob, BACK.z];
-  const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, AHEAD.z];
+  const backX = BACK.x, backZ = BACK.z;
+  const chaseEye=[backX, camY+8.4+bob, backZ];
+  const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, aheadZ];
 
   /* SIDE VIEW. Looking along -X, so world -Z becomes screen-right: the track
      runs off to the right and notes arrive from there, while altitude reads
