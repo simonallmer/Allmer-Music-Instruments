@@ -259,8 +259,6 @@
     <div class="pick" data-track="soultown">Soul Town</div>
   </div>
   <div class="track" id="gtrack">Track 01 — Atlantica</div>
-  <p id="gblurb">Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>.
-     Jump the barriers or you slow down.</p>
   <div class="keys">
     <b>&larr; &rarr;</b><span>move</span>
     <b>&uarr;</b><span>jump</span>
@@ -2141,6 +2139,10 @@ const CHANK_REST = [10, 6, 14, 2];
 
    `world` is the only value the RENDERER reads. Two worlds today: 'water' is
    a causeway over a drowned city, 'street' is wet asphalt under sodium light. */
+/* `blurb` is not rendered anywhere at the moment — the gate shows the track
+   name and the key legend and nothing else. The strings stay because they are
+   the track's own description rather than a property of the menu that dropped
+   them, and putting one back is a single line either here or in a HUD. */
 const TRACKS = {
   atlantica: {
     name:'Atlantica', num:'Track 01', blurb:'Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>. Jump the barriers or you slow down.',
@@ -4288,7 +4290,7 @@ const gate = document.getElementById('gate');
    route graph are properties of the track, not settings applied over one. So
    the gate chooses, and only then does anything exist. */
 let gPick = 'atlantica';
-const gTrackEl = document.getElementById('gtrack'), gBlurbEl = document.getElementById('gblurb');
+const gTrackEl = document.getElementById('gtrack');
 for(const el of gate.querySelectorAll('.pick')){
   el.addEventListener('click', e=>{
     e.stopPropagation();                       // choosing is not starting
@@ -4296,7 +4298,6 @@ for(const el of gate.querySelectorAll('.pick')){
     for(const o of gate.querySelectorAll('.pick')) o.classList.toggle('on', o === el);
     const T = TRACKS[gPick];
     gTrackEl.textContent = T.num + ' — ' + T.name;
-    gBlurbEl.innerHTML = T.blurb;
   });
 }
 gate.addEventListener('click', ()=>{
