@@ -1170,11 +1170,22 @@ const NODES_WATER = {
      junction. It previously took two chained forks — 31 seconds of precise play
      — which buried the most interesting thing in the game behind a corridor
      almost nobody would walk. Left is always "play the melody". */
+  /* GOING STRAIGHT IS A SONG FORM, not one node on repeat. Every S exit used
+     to point back at its own node — causeway → causeway → causeway — so a
+     player who simply held the line heard the SAME TWO BARS of chart for as
+     long as they held it. That is the "the points you pick up repeat": not the
+     bed, the CHART, looping every eight bars because the route was a
+     self-edge.
+
+     S now walks a four-node cycle: verse, second verse, chorus, bridge, and
+     back. Hold the line and you get a structure. The L and R exits are
+     untouched, so the melody layer and the side streets still hang off the
+     same forks they always did. */
   shallows:{ name:'The Shallows',    bars:8, kind:'causeway', pat:'easy',   exits:{L:'ascent',   S:'causeway', R:'alley'   } },
-  causeway:{ name:'Atlantica Reach', bars:8, kind:'causeway', pat:'verseA', exits:{L:'ascent',   S:'causeway', R:'alley'   } },
-  open:    { name:'Open Water',      bars:8, kind:'open',     pat:'chorus', exits:{L:'ascent',   S:'open',     R:'canal'   } },
-  drowned: { name:'Atlantica Deep',  bars:8, kind:'causeway', pat:'verseB', exits:{L:'ascent',   S:'drowned',  R:'alley'   } },
-  flood:   { name:'The Flood',       bars:8, kind:'open',     pat:'bridge', exits:{L:'ascent',   S:'open',     R:'canal'   } },
+  causeway:{ name:'Atlantica Reach', bars:8, kind:'causeway', pat:'verseA', exits:{L:'ascent',   S:'drowned',  R:'alley'   } },
+  drowned: { name:'Atlantica Deep',  bars:8, kind:'causeway', pat:'verseB', exits:{L:'ascent',   S:'open',     R:'alley'   } },
+  open:    { name:'Open Water',      bars:8, kind:'open',     pat:'chorus', exits:{L:'ascent',   S:'flood',    R:'canal'   } },
+  flood:   { name:'The Flood',       bars:8, kind:'open',     pat:'bridge', exits:{L:'ascent',   S:'causeway', R:'canal'   } },
 
   /* SIDE STREETS. A right fork turns off the causeway into a three-lane street
      that runs SIX bars instead of eight and always rejoins the main track. The
@@ -1199,11 +1210,12 @@ const NODES_WATER = {
    junction at each midpoint, six-bar side streets that always rejoin — so
    every invariant the route machinery already relies on stays true. */
 const NODES_STREET = {
+  // Same four-node cycle on S — see the note in NODES_WATER.
   motorrow: { name:'Motor Row',      bars:8, kind:'causeway', pat:'soulEasy',   exits:{L:'rising', S:'twelfth',   R:'backlot'} },
-  twelfth:  { name:'Twelfth Street', bars:8, kind:'causeway', pat:'soulVerse',  exits:{L:'rising', S:'twelfth',   R:'backlot'} },
-  hitsville:{ name:'Hitsville',      bars:8, kind:'open',     pat:'soulChorus', exits:{L:'rising', S:'hitsville', R:'neonrow'} },
-  grand:    { name:'Grand River',    bars:8, kind:'causeway', pat:'soulVerse',  exits:{L:'rising', S:'hitsville', R:'backlot'} },
-  lateset:  { name:'The Late Set',   bars:8, kind:'open',     pat:'soulBridge', exits:{L:'rising', S:'hitsville', R:'neonrow'} },
+  twelfth:  { name:'Twelfth Street', bars:8, kind:'causeway', pat:'soulVerse',  exits:{L:'rising', S:'grand',     R:'backlot'} },
+  grand:    { name:'Grand River',    bars:8, kind:'causeway', pat:'soulEasy',   exits:{L:'rising', S:'hitsville', R:'backlot'} },
+  hitsville:{ name:'Hitsville',      bars:8, kind:'open',     pat:'soulChorus', exits:{L:'rising', S:'lateset',   R:'neonrow'} },
+  lateset:  { name:'The Late Set',   bars:8, kind:'open',     pat:'soulBridge', exits:{L:'rising', S:'twelfth',   R:'neonrow'} },
   backlot:  { name:'Back Lot',       bars:6, kind:'causeway', lanes:3, pat:'soulAlley', exits:{L:'twelfth',   S:'twelfth',   R:'grand'  } },
   neonrow:  { name:'Neon Row',       bars:6, kind:'open',     lanes:3, pat:'soulAlley', exits:{L:'hitsville', S:'hitsville', R:'lateset'} },
   rising:   { name:'The Rising',     bars:8, kind:'melody',   pat:'soulAscent', exits:{L:'rising',    S:'twelfth',   R:'hitsville'} }
@@ -1224,6 +1236,17 @@ let routeEndBeat = 0;
      tier 2 → 32nds     (half-steps between them)
    Density is baked in when a node is generated, so it reflects the gear you were
    in when you earned it. Drop a gear and the NEXT node eases off again. */
+/* THE TEMPO BARELY MOVES ANY MORE. Gears used to swing the whole track by a
+   fifth of its speed — 120 to 146, 96 to 118 — which meant the player was
+   effectively choosing the BPM by how well they were playing, and the piece
+   never settled anywhere long enough to feel like one piece. Every gear change
+   is a tempo change, every tempo change is a seam, and you cannot be smooth
+   across a seam you caused yourself.
+
+   The ranges are now a few BPM wide: the speedometer still climbs, the track
+   still lifts, but it drifts rather than lurching and the groove stays put.
+   The ESCALATION was never really the tempo anyway — it is the density below,
+   and that is untouched. */
 const SUBDIV = ['8ths','16ths','32nds'];
 // Mirrors Clock.gear. Kept separate because the first node is generated at module
 // scope, before `const Clock` is initialised — reading Clock.gear there is a TDZ
@@ -2121,7 +2144,7 @@ const CHANK_REST = [10, 6, 14, 2];
 const TRACKS = {
   atlantica: {
     name:'Atlantica', num:'Track 01', blurb:'Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>. Jump the barriers or you slow down.',
-    gears:[120,126,134,146], scale:PENT_MINOR, roots:[0,1,4,2],
+    gears:[124,126,128,130], scale:PENT_MINOR, roots:[0,1,4,2],
     names:['A','C','D','E','G'], nodes:NODES_WATER, start:'shallows',
     pal:PAL_WATER, world:'water', bed:'bedWater', answer:'alienAnswer',
     // Dotted 8th, fed back — a flooded hall.
@@ -2130,7 +2153,7 @@ const TRACKS = {
   },
   soultown: {
     name:'Soul Town', num:'Track 02', blurb:'One in the morning, downtown. Ride the backbeat — <b>the tambourine is the grid</b>. Same five frets, major key.',
-    gears:[96,102,110,118], scale:PENT_MAJOR, roots:[0,4,1,3],
+    gears:[100,102,104,106], scale:PENT_MAJOR, roots:[0,4,1,3],
     names:['C','D','E','G','A'], nodes:NODES_STREET, start:'motorrow',
     pal:PAL_STREET, world:'street', bed:'bedStreet', grid:true, answer:'hornShout',
     /* SLAP-BACK, not a hall. A single short repeat with almost no feedback is
@@ -2273,6 +2296,12 @@ const Clock = {
     setInterval(()=>this.schedule(), 25);
   },
   spb(){ return 60/this.bpm; },
+  /* Which way the current bar's chord leans, in scale degrees, wrapped into
+     ±2 so a chord change voice-leads instead of leaping a sixth. */
+  chordShift(){
+    const sh = ROOTS[((Math.floor(this.songBeat()/4) % 4) + 4) % 4];
+    return sh > 2 ? sh - 5 : sh;
+  },
   // THE master clock. Everything visual and logical is a function of this.
   songBeat(){ if(!this.started) return 0;
     if(this.paused) return this.pauseBeat;
@@ -2799,14 +2828,25 @@ const Clock = {
       const soft = (s16 === 0 || s16 === 8) ? 1 : 0.42;   // anchors loud, pushes light
       const o = c.createOscillator(), g = c.createGain();
       o.type = 'sine';
-      o.frequency.setValueAtTime(120, t);
-      o.frequency.exponentialRampToValueAtTime(45, t + 0.055);
+      /* SMACK IS A TRANSIENT, NOT A LEVEL. The bus has no headroom left to
+         make anything louder with, and louder is not what "hits harder" means
+         anyway — it means the first ten milliseconds arrive faster and harder
+         than what follows. So the pitch drop is quicker (0.045, was 0.055),
+         the attack is a third shorter, and the beater click is two layers
+         instead of one. Same peak, twice the punch.
+
+         Both click layers stay under 4kHz. A beater on a 1965 kit is wood on
+         a skin in a room, not a modern click — take it above that and it stops
+         being retro however hard it hits. */
+      o.frequency.setValueAtTime(132, t);
+      o.frequency.exponentialRampToValueAtTime(45, t + 0.045);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.86*soft, t + 0.005);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+      g.gain.exponentialRampToValueAtTime(0.86*soft, t + 0.0035);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
       o.connect(g).connect(this.kickDrive);
-      o.start(t); o.stop(t + 0.38);
-      this.noise(t, 0.006, 2000, 'highpass', 0.10*soft, this.kickDrive);
+      o.start(t); o.stop(t + 0.36);
+      this.noise(t, 0.004, 1500, 'bandpass', 0.20*soft, this.kickDrive);   // wood
+      this.noise(t, 0.008, 3200, 'highpass', 0.13*soft, this.kickDrive);   // air
       /* Barely a duck — except in an alley, where it ducks like house does.
          With the chank, the horns and most of the bass gone there is nothing
          holding the floor between the drums, and the pump is what turns four
@@ -2828,10 +2868,14 @@ const Clock = {
       sn.frequency.setValueAtTime(232, t);
       sn.frequency.exponentialRampToValueAtTime(178, t + 0.05);
       sg.gain.setValueAtTime(0.0001, t);
-      sg.gain.exponentialRampToValueAtTime(0.46, t + 0.003);
-      sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
-      sn.connect(sg).connect(this.drive); sn.start(t); sn.stop(t + 0.20);
-      this.noise(t, 0.11, 2100, 'bandpass', 0.40, K);
+      sg.gain.exponentialRampToValueAtTime(0.46, t + 0.0022);
+      sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      sn.connect(sg).connect(this.drive); sn.start(t); sn.stop(t + 0.18);
+      // The crack: a very short bright burst on top of the body, which is the
+      // stick hitting the skin. Capped at 4.8k — the snap of a snare on tape,
+      // not the sizzle of a sample.
+      this.noise(t, 0.010, 4800, 'highpass', 0.26, this.drive);
+      this.noise(t, 0.09, 2100, 'bandpass', 0.40, K);
       for(let i=0;i<3;i++) this.noise(t + 0.004 + i*0.011, 0.05, 1500, 'bandpass', 0.30, K);
       this.noise(t + 0.002, 0.16, 3600, 'highpass', 0.16, K);
     }
@@ -2862,12 +2906,13 @@ const Clock = {
         this.tone(tt, side ? 1320 : 1180, 'square', 0.001, 0.022, side ? 0.04 : 0.07, 4600, K);
       }
     }
-    /* A SHAKER on the odd 16ths, swung, and so quiet it is felt rather than
-       heard — it is the layer that makes the space between the 8ths move.
-       Boulevard only: it is the first thing that would clutter a small room. */
-    if(main && s16 % 2 === 1)
-      this.noise(t + SWG, 0.020, 9000 + Math.random()*2500, 'highpass',
-                 0.018 + Math.random()*0.009, K);
+    /* NO SHAKER. One was added here on the odd 16ths at 9–11.5kHz, meant to be
+       felt rather than heard. It was heard: a thin hiss sitting on top of a
+       track whose whole character is a 1965 tape machine that rolls off well
+       below it. Anything up there reads as modern before it reads as anything
+       else, and no amount of turning it down fixes being in the wrong decade —
+       so it is gone rather than quieter. The tambourine already owns the 8ths
+       and the ghosts already own the space between them. */
 
     /* ── THE BASSLINE ──────────────────────────────────────────────
        Four written bars, not one figure with a moving root. Triangle through
@@ -3609,7 +3654,16 @@ const Game = {
     const lane = Math.max(0, Math.min(4, e ? e.lane : this.hitLane()));
     const oct  = this.octUp ? 5 : 0;
     const vel  = 0.85 + Math.min(0.15, this.flowChain*0.015);
-    Clock.strike(lane, ORB_DEG(lane) + oct, vel, undefined, acc);
+    /* THE NOTE FOLLOWS THE CHORD. lane → degree was fixed, so lane 0 sounded
+       the same pitch in every bar of the I–vi–ii–V — a topline that never
+       moves over a bass that does, which is why a repeating figure started to
+       sound wrong rather than merely repetitive. The shift is diatonic and
+       kept inside two scale degrees, so the fretboard's order survives (lane 0
+       is still the lowest) and the line leans with the harmony instead of
+       sitting across it. Not in the melody layer, where the lane IS the note
+       and the HUD is naming it. */
+    Clock.strike(lane, ORB_DEG(lane) + oct + (this.inMelody ? 0 : Clock.chordShift()),
+                 vel, undefined, acc);
 
     this.timbreHit[STEMS[lane].key] = acc >= 2 ? 1 : acc <= 0 ? 0.35 : 0.7;
 
