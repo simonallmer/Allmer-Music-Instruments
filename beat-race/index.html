@@ -1229,15 +1229,12 @@ function pushNode(key, choice){
     : (prev ? prev.cx : 0) + (choice==='L' ? -CURVE_W : choice==='R' ? CURVE_W : 0);
   const startBeat = routeEndBeat;
   const tier = densityTier();
-  // Where the previous block left us — position and heading both.
-  const from = prev ? pathInto(prev.endBeat, PATH_C) : null;
+  // Geometry lives on the lattice walk now (SEGS), not on the musical route.
   const ent = { key, name:n.name, kind:n.kind, startBeat,
                 endBeat: startBeat + n.bars*4, cx, tier,
                 lanes: n.lanes || LANES,
-                turn, px: from ? from.x : 0, pz: from ? from.z : 0,
-                h: from ? from.h : 0,
+                turn,
                 junctionBeat: startBeat + n.bars*4 - JUNC_LEAD };
-  ent.arc = arcEndOf(ent);            // cached: seeds its own straight run
   ROUTE.push(ent);
   routeEndBeat = ent.endBeat;
 
@@ -1359,19 +1356,46 @@ const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
    because it seeds both the straight run after it and the next block. */
 /* Where a block actually begins: the same point the last one ended, facing a
    quarter turn off it if this block turns. Cached when the block is pushed. */
-function arcEndOf(e){
-  return { x:e.px, z:e.pz, h: e.h + Math.sign(e.turn||0)*(Math.PI/2) };
-}
+
 /* The centreline at beat b, in WORLD space. Writes into `out` rather than
    returning an object: the draw loops call this a few thousand times a frame
    and a per-call allocation there is a garbage collector running during a
    rhythm game. Two scratch records are provided below for callers that need
    to hold two points at once. */
+/* ── THE WALK ────────────────────────────────────────────────────────────
+   The path is a list of LATTICE SEGMENTS, one per city block, not a list of
+   musical sections. That distinction is the whole fix.
+
+   Turning used to hang off ROUTE, whose blocks are eight bars — 640 units,
+   four city blocks. So three intersections out of every four had nothing
+   attached to them and simply ignored you, and the fourth only worked if the
+   next block happened to have been pushed already. That is exactly what
+   "sometimes it works, sometimes it doesn't, sometimes it's delayed by one"
+   is: a turn is a property of a CROSSING, and crossings are 8 beats apart,
+   not 32.
+
+   So segments are 8 beats each — BLOCK units at UPB — and every boundary
+   between two of them is a real intersection you can turn at. They are grown
+   lazily and straight ahead, because straight ahead is what happens if you do
+   nothing, and turning is just writing a heading into one of them.
+
+   Atlantica rides this too and cannot tell: every segment inherits heading 0
+   from (0,0), which is the straight line down -Z it always had. Its sideways
+   weave lives in centerX() and never touched this. */
+const SEG_B = BLOCK/UPB;                 // beats per city block — 8
+const SEGS = [{ x:0, z:0, h:0 }];
+function segIndex(b){ return Math.max(0, Math.floor(b/SEG_B)); }
+function ensureSeg(i){
+  while(SEGS.length <= i){
+    const p2 = SEGS[SEGS.length-1];
+    SEGS.push({ x: p2.x + fwdX(p2.h)*BLOCK, z: p2.z + fwdZ(p2.h)*BLOCK, h: p2.h });
+  }
+  return SEGS[i];
+}
 function pathInto(b, out){
-  const e = ROUTE[routeIndexAt(b)];
-  const u = Math.max(0, (b - e.startBeat)*UPB);
-  const a = e.arc;
-  out.x = a.x + fwdX(a.h)*u; out.z = a.z + fwdZ(a.h)*u; out.h = a.h;
+  const i = segIndex(b);
+  const s2 = ensureSeg(i), u = Math.max(0, (b - i*SEG_B)*UPB);
+  out.x = s2.x + fwdX(s2.h)*u; out.z = s2.z + fwdZ(s2.h)*u; out.h = s2.h;
   return out;
 }
 const PATH_A = {x:0,z:0,h:0}, PATH_B = {x:0,z:0,h:0}, PATH_C = {x:0,z:0,h:0};
@@ -1449,25 +1473,29 @@ function viewInto(wx, wz, o, ch, sh, out){
    least diagnosable failure a driving game has. Runs on demand. */
 function validatePath(){
   const bad = [], A = {x:0,z:0,h:0}, B = {x:0,z:0,h:0};
-  // 1. blocks must join: the end of one is the start of the next, exactly.
-  for(let i=0;i<ROUTE.length-1;i++){
-    const e = ROUTE[i], n = ROUTE[i+1];
-    pathInto(e.endBeat - 1e-9, A);
-    if(Math.hypot(A.x-n.px, A.z-n.pz) > 0.02)
-      bad.push(`block ${i}->${i+1} jumps ${Math.hypot(A.x-n.px, A.z-n.pz).toFixed(3)} units`);
-    if(Math.abs(((A.h-n.h+Math.PI)%(2*Math.PI))-Math.PI) > 1e-3)
-      bad.push(`block ${i}->${i+1} heading jumps`);
+  // 1. segments must join: each starts exactly where the last one ended.
+  for(let i=0;i<SEGS.length-1;i++){
+    const e = SEGS[i], n = SEGS[i+1];
+    const ex = e.x + fwdX(e.h)*BLOCK, ez = e.z + fwdZ(e.h)*BLOCK;
+    const gap = Math.hypot(ex-n.x, ez-n.z);
+    if(gap > 0.02) bad.push(`segment ${i}->${i+1} jumps ${gap.toFixed(3)} units`);
   }
-  // 2. unit speed everywhere, arcs included: UPB units of world per beat.
+  // 2. and every segment must sit on the lattice, or the road you drive and
+  //    the roads that are drawn part company.
+  for(let i=0;i<SEGS.length;i++){
+    const e = SEGS[i];
+    if(Math.abs(e.x/BLOCK - Math.round(e.x/BLOCK)) > 1e-6 ||
+       Math.abs(e.z/BLOCK - Math.round(e.z/BLOCK)) > 1e-6)
+      bad.push(`segment ${i} is off the grid at (${e.x.toFixed(2)}, ${e.z.toFixed(2)})`);
+  }
+  // 3. unit speed: UPB units of world per beat.
   const b0 = ROUTE[0].startBeat, b1 = ROUTE[ROUTE.length-1].endBeat;
   for(let b = b0; b < b1 - 0.05; b += 0.25){
     // Skip samples that straddle a corner: the path turns instantly there, so
     // a finite difference across the boundary measures the chord of a right
     // angle rather than the distance travelled. That is the corner being
     // sharp, which is the point, not a fault.
-    let straddles = false;
-    for(const r of ROUTE) if(r.turn && b < r.startBeat && b + 0.05 > r.startBeat) straddles = true;
-    if(straddles) continue;
+    if(segIndex(b) !== segIndex(b + 0.05)) continue;   // straddles a corner
     pathInto(b, A); pathInto(b + 0.05, B);
     const v = Math.hypot(B.x-A.x, B.z-A.z)/0.05;
     if(Math.abs(v - UPB) > 0.6) bad.push(`speed ${v.toFixed(2)} at beat ${b.toFixed(2)} (want ${UPB})`);
@@ -1607,6 +1635,8 @@ function selectTrack(key){
     if(stemEls[STEMS[i].key]) stemEls[STEMS[i].key].row.querySelector('.nm').textContent = TRACK.names[i];
   }
   EVENTS.length = 0; ROUTE.length = 0; routeEndBeat = 0;
+  SEGS.length = 0; SEGS.push({ x:0, z:0, h:0 });      // back to the first block
+  FRAME.init = false;                                  // and the camera with it
   pushNode(TRACK.start, 'S');
 }
 
@@ -2497,33 +2527,30 @@ const Game = {
      The window is short and centred on the crossing. Miss it and you have
      simply carried straight on, which is the correct default and needs no
      code at all: the block was already pushed straight. */
+  /* THE CROSSING YOU COULD TURN AT: the nearest segment boundary, as long as
+     you have not already gone through it. Mostly ahead of you, with a little
+     grace just after, so an input a hair late still takes the corner it was
+     obviously aimed at instead of the next one. */
   turnAt(b){
-    if(!TRACK.grid) return null;
-    for(let i=1;i<ROUTE.length;i++){
-      const e = ROUTE[i];
-      if(!e.turned && Math.abs(b - e.startBeat) <= TURN_WIN) return e;
-    }
-    return null;
+    if(!TRACK.grid) return -1;
+    const i = Math.round(b/SEG_B);
+    if(i < 1) return -1;
+    const d = i*SEG_B - b;                      // >0 the crossing is ahead
+    return (d <= TURN_WIN && d >= -0.30) ? i : -1;
   },
   takeTurn(dir){
-    const e = this.turnAt(Clock.songBeat());
-    if(!e) return false;
-    e.turn = dir; e.turned = true;
-    e.arc = arcEndOf(e);                       // one field, one recompute
-    /* Any block already pushed BEHIND this one was seeded from where this one
-       used to end, and it no longer ends there. Re-seed the tail or the road
-       tears open at the next boundary — validatePath() catches exactly this,
-       which is what it is for. */
-    for(let i = ROUTE.indexOf(e) + 1; i < ROUTE.length; i++){
-      /* endBeat is ALSO the next block's startBeat, and routeIndexAt() resolves
-         a tie forwards — so asking for the path at exactly that beat returns
-         the block we are trying to re-seed, reading back the stale value it
-         was supposed to replace. A hair earlier lands inside the block that
-         actually ends there. */
-      const q = ROUTE[i], from = pathInto(ROUTE[i-1].endBeat - 1e-6, PATH_C);
-      q.px = from.x; q.pz = from.z; q.h = from.h;
-      q.arc = arcEndOf(q);
-    }
+    const i = this.turnAt(Clock.songBeat());
+    if(i < 0) return false;
+    ensureSeg(i);
+    const prev = SEGS[i-1];
+    /* Everything past this crossing is regrown from the new heading. Cheap,
+       because a segment is three numbers and they are generated straight on
+       demand — and correct by construction, which the hand re-seeding of the
+       old version was not. */
+    SEGS.length = i;
+    SEGS.push({ x: prev.x + fwdX(prev.h)*BLOCK,
+                z: prev.z + fwdZ(prev.h)*BLOCK,
+                h: prev.h + dir*(Math.PI/2) });
     judge(dir < 0 ? '◄ TURN' : 'TURN ►', '#e05ca8');
     Clock.latch();
     return true;
