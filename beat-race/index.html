@@ -972,7 +972,10 @@ const PATTERNS = {
     // rest
     {s:16, lane:2, a:2}, {s:18, lane:1, a:1}, {s:20, lane:0, a:1},
     // long rest — the bar breathes
-    {s:26, lane:1, a:2}, {s:28, lane:2, a:1} ]},
+    {s:26, lane:1, a:2}, {s:28, lane:2, a:1},
+    // One on each edge from the very first bars, so neither side is ever the
+    // safe one to sit in.
+    {s:13, lane:0, t:'haz'}, {s:24, lane:4, t:'haz'} ]},
 
   // VERSE A — low and syncopated. The riff sits under the clap and answers it.
   verseA: { bars:2, ev:[
@@ -980,7 +983,13 @@ const PATTERNS = {
     {s:8,  lane:1, a:2}, {s:10, lane:0, a:0},
     {s:16, lane:1, a:2}, {s:19, lane:2, a:1}, {s:22, lane:3, a:1},
     {s:24, lane:2, a:2}, {s:30, lane:1, a:1},
-    {s:13, lane:4, t:'haz'} ]},
+    /* ONE BARRIER PER EDGE. Both of these used to be a single hazard on lane 4,
+       and because the straight route through Atlantica is causeway → causeway
+       → causeway, this figure repeats for as long as you hold the line: every
+       barrier in the run appeared on the outer RIGHT and nowhere else, so the
+       left edge was permanently safe and half the deck stopped being a
+       decision. Mirrored across the two bars instead. */
+    {s:13, lane:4, t:'haz'}, {s:29, lane:0, t:'haz'} ]},
 
   // VERSE B — the same shape one fret up, so the section reads as a repeat with
   // a lift rather than as a new idea. Pentatonic, so it cannot go wrong.
@@ -989,7 +998,7 @@ const PATTERNS = {
     {s:8,  lane:2, a:2}, {s:10, lane:1, a:0},
     {s:16, lane:2, a:2}, {s:19, lane:3, a:1}, {s:22, lane:4, a:1},
     {s:24, lane:3, a:2}, {s:28, lane:2, a:1}, {s:30, lane:1, a:1},
-    {s:13, lane:0, t:'haz'} ]},
+    {s:13, lane:0, t:'haz'}, {s:26, lane:4, t:'haz'} ]},
 
   // CHORUS — the payoff. Denser, higher, and it opens on the strongest accent
   // in the track: four straight hits before it lets you breathe.
@@ -1087,31 +1096,11 @@ const PATTERNS = {
     {s:0,  lane:2, a:2}, {s:4,  lane:1, a:1}, {s:8,  lane:2, a:2}, {s:12, lane:3, a:1},
     {s:16, lane:2, a:2}, {s:20, lane:1, a:1}, {s:24, lane:2, a:2}, {s:28, lane:3, a:1} ]},
 
-  /* THE OTHER SIDE STREET. Two figures for three lanes rather than one, chosen
-     by the block, because a city with one side street in it is a corridor with
-     a bend. Where soulAlley walks straight quarters, this one answers itself
-     across the bar — the same three frets, the opposite phrasing. */
-  soulSideB: { bars:2, span:[1,3], ev:[
-    {s:0,  lane:1, a:2}, {s:6,  lane:2, a:1},
-    {s:8,  lane:3, a:2}, {s:12, lane:2, a:1}, {s:14, lane:1, a:1},
-    {s:16, lane:1, a:2}, {s:22, lane:2, a:1},
-    {s:24, lane:3, a:2}, {s:28, lane:2, a:1}, {s:30, lane:1, a:1} ]},
-
-  /* THE ALLEY. One lane wide, so one fret — and the moment a chart has only
-     one pitch in it the interesting thing is no longer WHICH note but WHEN.
-     Deliberately sparse: every gap here is 1.5 beats, which is exactly what
-     placeHurdles() is looking for, so an alley fills itself with things to
-     jump without a single line of code saying "alleys have obstacles". The
-     narrow street IS the obstacle course, by construction.
-
-     Musically it is the break — the bar where a record like this drops to the
-     drums and one note of bass and everybody waits. Which is what an alley at
-     one in the morning sounds like. */
-  soulSingle: { bars:2, span:[2,2], ev:[
-    {s:0,  lane:2, a:2}, {s:6,  lane:2, a:1},
-    {s:8,  lane:2, a:2}, {s:14, lane:2, a:1},
-    {s:16, lane:2, a:2}, {s:22, lane:2, a:1},
-    {s:24, lane:2, a:2}, {s:30, lane:2, a:2} ]},
+  /* Two figures for three lanes and one for a single lane used to live here,
+     one per street class. They are gone: a street now FOLDS the section's own
+     phrase into the width it has (see foldLane) rather than replacing it, so
+     the rhythm runs unbroken through every turn. A per-class figure is a new
+     groove every eight beats, which is no groove at all. */
 
   // THE RISING — the melody layer. A gospel climb and a step back down.
   soulAscent: { bars:2, ev:[
@@ -1355,16 +1344,40 @@ function pushNode(key, choice){
 
    The SECTION still decides the harmony, the density tier and whether you are
    flying. The STREET decides the shape of the line. Two authors, one chart. */
-const SIDE_PATS = ['soulAlley', 'soulSideB'];
-function patForBlock(ent, seg){
-  const node = NODES[ent.key];
-  // Flying: altitude is a pitch, so a narrow street cannot take frets away.
-  if(ent.kind === 'melody') return PATTERNS[node.pat];
-  const cls = ensureSeg(seg).cls;
-  if(cls >= 5) return PATTERNS[node.pat];
-  if(cls === 1) return PATTERNS.soulSingle;
-  return PATTERNS[SIDE_PATS[hash2(seg*3.71, 17.3) < 0.5 ? 0 : 1]];
+/* ══ THE STREET NARROWS THE LINE — IT DOES NOT REPLACE IT ═════════════
+   This used to swap in a different FIGURE per street class: one for a
+   boulevard, two for side streets, one for alleys. Which meant the rhythm
+   changed at every block boundary — every eight beats, wherever you drove —
+   and a rhythm that is re-chosen every two bars is not a groove, it is a
+   sequence of unrelated fragments. Turning felt like scrubbing between takes
+   rather than driving through a piece.
+
+   The fix is to separate the two things a chart carries. RHYTHM is the track;
+   it belongs to the section, it runs continuously, and nothing the player
+   steers may interrupt it. RANGE is the street; it is what the width buys you.
+
+   So every block plays the section's own figure, on the section's own steps,
+   and the street FOLDS the lanes into the width it has:
+
+     5 lanes   0 1 2 3 4    the phrase as written
+     3 lanes   1 2 2 3 3    the same phrase, contour compressed
+     1 lane    2 2 2 2 2    the same phrase, all rhythm, no melody
+
+   The accents never move. The line is the same line, said with fewer notes to
+   say it in — and an alley becomes the moment the tune drops to one note and
+   the groove keeps walking, which is a real thing records do and is worth far
+   more than a fourth unrelated figure.
+
+   The fold is MONOTONE and never stretches a step: adjacent lanes map to lanes
+   that differ by at most one, so |Δlane| can only shrink. Every chart that
+   walks before folding still walks after it, which is why validateCharts() can
+   keep checking the patterns as written and nothing here needs re-verifying. */
+function foldLane(l, lo, hi){
+  const n = hi - lo + 1;
+  return lo + Math.round(l * (n - 1) / (LANES - 1));
 }
+const clsSpan = cls => { const pad = Math.max(0, (LANES - cls) >> 1);
+                         return { lo: pad, hi: LANES-1-pad }; };
 /* Emit (or re-emit) the notes for one lattice block. `notBefore` protects the
    past: a turn regrows the block you are standing in, and the notes of it you
    have already played must not come back. */
@@ -1372,15 +1385,50 @@ function emitBlock(seg, notBefore){
   const from = seg*SEG_B;
   const ent = routeAt(from + 0.001);
   if(!ent || from < ent.startBeat - 0.001 || from >= ent.endBeat) return;
-  const pat = patForBlock(ent, seg);
+  const pat = PATTERNS[NODES[ent.key].pat];
   const evs = densify(pat.ev, ent.tier);
   const patB = pat.bars*4;
+  /* Flying: altitude is a pitch, so a narrow street cannot take frets away —
+     the melody layer plays the phrase at full range whatever the road does. */
+  const cls = ent.kind === 'melody' ? LANES : ensureSeg(seg).cls;
+  const sp = clsSpan(cls);
   for(let at = from; at < from + SEG_B && at < ent.endBeat; at += patB)
     for(const e of evs){
       const bt = at + e.s/4;
       if(bt < notBefore || bt >= ent.endBeat) continue;
-      EVENTS.push({ beat: bt, lane:e.lane, t: e.t || 'flow',
-                    acc: e.a === undefined ? 1 : e.a, fill: !!e.fill, done:false });
+      const acc = e.a === undefined ? 1 : e.a;
+      if(cls <= 1){
+        /* AN ALLEY PLAYS THE PHRASE HEADS AND NOTHING ELSE.
+
+           On one fret every note is the same note, so the body of the phrase
+           stops being a line and becomes a wall of repeated 16ths — and at
+           gear 4 that is all an alley would be. Keeping only the accents
+           leaves them EXACTLY where the phrase put them (nothing moves, so
+           the groove cannot contradict itself) and reads as what it is: the
+           band dropping to the hits and the room showing through. Which is
+           also what puts the obstacles back — placeHurdles() goes wherever
+           notes are not, so the rests this opens fill themselves.
+
+           AND NO BARRIERS. A hazard is dodged by being in another lane, and an
+           alley has no other lane: folded to the middle it would sit in the
+           only place you can be. Unavoidable damage, so it does not exist
+           here — the hurdles are the alley's obstacle and they are jumped. */
+        if(e.t === 'haz') continue;
+        if((!e.t || e.t === 'flow') && acc < 2) continue;
+      }
+      let lane = e.lane;
+      if(!e.t || e.t === 'flow' || e.t === 'haz'){
+        lane = foldLane(lane, sp.lo, sp.hi);
+        /* And clamped to the width AT THIS BEAT, not at the block's, because
+           the road narrows across the 1.2 beats into a crossing: a note on the
+           outer fret in the last bar of a boulevard would otherwise be sitting
+           off the edge of the alley you are already entering. Clamping is
+           non-expansive too, so the walk still holds. */
+        const now = laneSpanAt(bt);
+        lane = Math.max(now.lo, Math.min(now.hi, lane));
+      }
+      EVENTS.push({ beat: bt, lane, t: e.t || 'flow',
+                    acc, fill: !!e.fill, done:false });
     }
   placeHurdles(ent, Math.max(from, notBefore), Math.min(from + SEG_B, ent.endBeat));
 }
@@ -1578,15 +1626,28 @@ const CLS_NAME = { 5:'MAIN ROAD', 3:'SIDE STREET', 1:'ALLEY' };
    an unlit plane, so every gap between two buildings went straight to the
    horizon and the place read as scenery flats rather than as a city with
    ground between the parts of it. */
+/* MASONRY IS BRIGHTER THAN IT LOOKS AT NIGHT, and these were not. A face
+   turned away from the light comes out of the object shader at 0.52 of its own
+   colour, so a wall of 0.06 renders at 0.03 — nine values out of 255, which is
+   a hole in the screen, not a building. Swing the camera round a corner and a
+   near facade turns its shaded side to you as a large black rectangle, which
+   is a good part of what "the camera rotating destroys the magic" was. Roughly
+   doubled: the lit side reads as brick and the shaded side stays dark without
+   going to nothing.
+
+   The Strip is taller too — it is the downtown, and a city needs somewhere the
+   skyline actually rises, both to look at and to steer by. And The Yards is no
+   longer half empty lots: the gaps are what let you see through a district,
+   and a district made of them has nothing to see. */
 const DISTRICTS = [
-  { name:'The Works',  wall:[0.098,0.062,0.052], neon:[1.00,0.62,0.20], hi:[14,24],
+  { name:'The Works',  wall:[0.185,0.120,0.098], neon:[1.00,0.62,0.20], hi:[14,26],
     grd:[0.086,0.072,0.062], mix:['works','works','lot','tenement'] },
-  { name:'Sugar Hill', wall:[0.078,0.080,0.072], neon:[1.00,0.84,0.42], hi:[18,34],
+  { name:'Sugar Hill', wall:[0.150,0.152,0.138], neon:[1.00,0.84,0.42], hi:[18,34],
     grd:[0.078,0.076,0.070], mix:['tenement','chapel','shopfront','tenement'] },
-  { name:'The Strip',  wall:[0.062,0.052,0.086], neon:[0.98,0.24,0.62], hi:[30,58],
+  { name:'The Strip',  wall:[0.120,0.100,0.162], neon:[0.98,0.24,0.62], hi:[34,74],
     grd:[0.072,0.066,0.082], mix:['theatre','shopfront','theatre','tenement'] },
-  { name:'The Yards',  wall:[0.062,0.066,0.078], neon:[0.42,0.88,0.98], hi:[12,20],
-    grd:[0.090,0.092,0.098], mix:['lot','works','lot','works'] }
+  { name:'The Yards',  wall:[0.120,0.128,0.148], neon:[0.42,0.88,0.98], hi:[12,22],
+    grd:[0.090,0.092,0.098], mix:['works','lot','works','works'] }
 ];
 const districtOf = (i, j) =>
   DISTRICTS[Math.min(3, (hash2(Math.floor(i/2)*5.11, Math.floor(j/2)*7.33)*4)|0)];
@@ -2498,7 +2559,15 @@ const Clock = {
     /* THE HARMONY MOVES WITH THE ROAD. An alley pedals the tonic - one chord,
        one note, no motion, which is what makes it read as a hole in the record
        rather than a quieter version of it. */
-    const root = alley ? ROOTS[0] : (side ? this.SIDE_ROOTS : ROOTS)[bar % 4];
+    /* THE HARMONY STILL MOVES ON THE BAR, on every street. An alley pedalled a
+       single degree for its whole length, which stopped the progression dead
+       for two bars and then rejoined it mid-cycle — the harmonic rhythm itself
+       was changing with the road, and that is the one layer that has to keep
+       time. It alternates root and fifth now: still a pedal, still the
+       emptiest harmony in the track, but it breathes on the bar like
+       everything else. */
+    const root = alley ? (bar % 2 ? ROOTS[3] : ROOTS[0])
+                       : (side ? this.SIDE_ROOTS : ROOTS)[bar % 4];
     const c = this.ctx, D = this.duck, K = D;
     /* THE ROOM NARROWS TOO. A slap-back is a reflection off a wall, and in an
        alley the wall is four feet away - so the send goes up as the street
@@ -2554,27 +2623,34 @@ const Clock = {
     /* TAMBOURINE — every 8th, and harder on the offbeat. Short, bright, and
        slightly different every hit, because a tambourine is a handful of
        jingles and never lands twice the same way. */
-    /* TAMBOURINE - every 8th on the boulevard, and it thins with the street.
-       On a side street it drops to the quarters and gets a dry stick on the
-       offbeat instead, which is the same grid told drier. In an alley the
-       tambourine is gone altogether and the 8ths are a stick on a rim: nobody
-       carries a tambourine down an alley. The GRID never changes - the
-       tambourine is still what tells you where the 8ths are - only what is
-       holding it. */
+    /* TAMBOURINE — ON EVERY 8TH, ON EVERY STREET, ALWAYS.
+
+       This track's own instructions say "the tambourine is the grid", and the
+       first pass took it at its word in the wrong direction: it thinned to the
+       quarters on a side street and was replaced outright by a rim stick in an
+       alley. Which removed the pulse exactly when the chart, the bassline, the
+       chords and the room were all changing too — four things moving at once
+       and nothing holding the beat, every eight beats. That is most of why the
+       groove went missing.
+
+       So the grid is now the one thing a turn CANNOT touch. Every 8th, hard on
+       the offbeat, on all three streets. What the street changes is the TONE
+       of it — bright and ringing on the boulevard, drier and closer indoors, a
+       tambourine held tight against the hand in an alley with a stick doubling
+       it — and the level, never the placement. You always know where you are. */
     if(s16 % 2 === 0){
       const off = (s16 % 4 === 2);
-      if(alley){
-        // Stick on a rim. Tight, wooden, and the only thing keeping the grid.
-        this.tone(t, off ? 1180 : 940, 'square', 0.001, off ? 0.028 : 0.018,
-                  off ? 0.085 : 0.05, 4200, K);
-        this.noise(t, 0.012, 5200, 'bandpass', off ? 0.10 : 0.055, K);
-      } else if(side && off){
-        this.noise(t, 0.020, 6200, 'bandpass', 0.11, K);      // dry stick
-        this.tone(t, 1320, 'square', 0.001, 0.022, 0.055, 5200, K);
-      } else {
-        const g = (off ? 0.20 : 0.11) * (0.86 + Math.random()*0.28) * (side ? 0.85 : 1);
-        this.noise(t, off ? 0.075 : 0.045, 7600 + Math.random()*1800, 'highpass', g, K);
-        this.noise(t + 0.006, 0.03, 11000, 'highpass', g*0.5, K);
+      const lvl = alley ? 0.78 : side ? 0.88 : 1.0;         // quieter, never absent
+      const hz  = alley ? 5200 : side ? 6600 : 7600;        // and duller, never gone
+      const g = (off ? 0.20 : 0.11) * (0.86 + Math.random()*0.28) * lvl;
+      this.noise(t, off ? (alley ? 0.042 : 0.075) : 0.045,
+                 hz + Math.random()*1800, 'highpass', g, K);
+      this.noise(t + 0.006, 0.03, alley ? 8000 : 11000, 'highpass', g*0.5, K);
+      // Indoors the offbeat gets a stick ON TOP of the tambourine, not instead
+      // of it: the same grid, struck harder, in a smaller room.
+      if(off && !main){
+        this.noise(t, 0.018, 6200, 'bandpass', side ? 0.07 : 0.11, K);
+        this.tone(t, side ? 1320 : 1180, 'square', 0.001, 0.022, side ? 0.04 : 0.07, 4600, K);
       }
     }
 
@@ -3900,12 +3976,20 @@ gate.addEventListener('click', ()=>{
    So the sink is now one number, applied to every prop in the city and larger
    than the tallest thing in it. Nothing pokes up, whatever its height, and
    there is no per-object arithmetic left to get wrong.                       */
-const CITY = { sink:0, yaw:0, R:340, beat:0, deck:[0.1,0.1,0.1], armed:0, live:false };
+/* R IS WHERE THE CITY STOPS, and it used to stop well short of where you can
+   still SEE. Fog reaches ~0.998 at 450 units, so anything nearer than that is
+   visible and anything past it is the horizon colour exactly — but the town
+   ended at 340, which left a band of ground between the last building and the
+   backdrop. Straight down a street you never noticed; swing the camera through
+   a corner, where the diagonal view is longer and the block corners are open
+   by design, and you looked across that band at nothing. Which is the "empty"
+   and the "background shines through on a turn" in one number. */
+const CITY = { sink:0, yaw:0, R:450, beat:0, deck:[0.1,0.1,0.1], armed:0, live:false };
 const CITY_SINK = 150;              // clears the tallest blade sign in the town
 
 function cityVis(wx, wz){
   viewInto(wx, wz, FRAME.o, FRAME.ch, FRAME.sh, VW);
-  return VW.z < 30 && VW.z > -352;
+  return VW.z < 30 && VW.z > -505;      // to the fog limit, not to the old radius
 }
 /* Every prop in the city goes through here: world position in, view position
    out, frustum cull and side-view sink folded in. Sizes are WORLD-axis half
@@ -4038,17 +4122,39 @@ function faceWindows(seed, u0, L, roofY, y0, warm){
   }
 }
 
+/* THE WALL ITSELF, with the two mouldings that stop it being a rectangle.
+
+   A close facade turned edge-on to the camera is one flat quad filling a
+   quarter of the screen, and no amount of neon further down the street fixes
+   that — it is the thing you are actually looking at during a corner, when the
+   view swings across a block at two metres' range. A plinth at the pavement
+   and a cornice at the roofline cost two instances, catch the light at a
+   different angle from the wall between them, and give the eye an edge and a
+   scale to read. Every archetype goes through here so no wall can be missed.
+
+   Returns the roof height, which every caller needs anyway. */
+function faceSlab(u0, L, h, w, near){
+  const roofY = DECK_Y - 2 + h*1.5;
+  facePut(u0, 0, DECK_Y - 2 + h*0.5, L, h, 7.5, w[0], w[1], w[2], 0);
+  if(near){
+    // Plinth: darker, proud of the wall, standing on the pavement.
+    facePut(u0, 0.35, DECK_Y + 0.5, L*1.005, 1.4, 7.85,
+            w[0]*0.62, w[1]*0.62, w[2]*0.66, 0);
+    // Cornice: lighter, and the line the roof reads along.
+    facePut(u0, 0.45, roofY - 0.55, L*1.01, 0.55, 7.95,
+            w[0]*1.55, w[1]*1.50, w[2]*1.42, 0);
+  }
+  return roofY;
+}
+
 /* THE SIX BUILDINGS. Each is a SILHOUETTE first: you should know what it is
    from its outline at two hundred units, before a single window resolves. A
    works has a sawtooth roof, a chapel has a spire, a theatre has a blade sign
    standing clear of the roofline, and a lot has no roof at all. */
 function faceTenement(D, seed, u0, L, h, w, near){
-  const roofY = DECK_Y - 2 + h*1.5;
-  facePut(u0, 0, DECK_Y - 2 + h*0.5, L, h, 7.5, w[0], w[1], w[2], 0);
+  const roofY = faceSlab(u0, L, h, w, near);
   faceWindows(seed, u0, L, roofY, DECK_Y + 4.2, [1.00, 0.80, 0.42]);
   if(!near) return;
-  // Cornice. One thin bright line at the roofline and the wall stops being a box.
-  facePut(u0, 0.4, roofY - 0.5, L*1.01, 0.45, 7.9, w[0]*1.7, w[1]*1.6, w[2]*1.5, 0);
   /* THE FIRE ESCAPE. Landings and their uprights, hung off the face. No
      diagonals: a stair rotated into a facade's frame needs a second rotation
      axis, and the silhouette does not need one to read. */
@@ -4065,8 +4171,8 @@ function faceTenement(D, seed, u0, L, h, w, near){
 }
 
 function faceWorks(D, seed, u0, L, h, w, near){
-  const hh = h*0.60, roofY = DECK_Y - 2 + hh*1.5;
-  facePut(u0, 0, DECK_Y - 2 + hh*0.5, L, hh, 7.5, w[0]*1.15, w[1]*1.10, w[2]*1.05, 0);
+  const hh = h*0.60;
+  const roofY = faceSlab(u0, L, hh, [w[0]*1.15, w[1]*1.10, w[2]*1.05], near);
   /* A SAWTOOTH ROOF — what a shed built to be daylit looks like, and instantly
      not a house. Three teeth, each with its glazed face turned north and cold. */
   if(near) for(let k=0;k<3;k++){
@@ -4086,8 +4192,7 @@ function faceWorks(D, seed, u0, L, h, w, near){
 }
 
 function faceTheatre(D, seed, u0, L, h, w, near){
-  const roofY = DECK_Y - 2 + h*1.5;
-  facePut(u0, 0, DECK_Y - 2 + h*0.5, L, h, 7.5, w[0], w[1], w[2], 0);
+  const roofY = faceSlab(u0, L, h, w, near);
   /* THE BLADE SIGN. A theatre announces itself vertically — the sign stands
      clear of the roofline so it can be read from the far end of the street,
      which is exactly the job it has to do here too. Four stacked segments, so
@@ -4119,8 +4224,8 @@ function faceTheatre(D, seed, u0, L, h, w, near){
 }
 
 function faceShopfront(D, seed, u0, L, h, w, near){
-  const hh = h*0.50, roofY = DECK_Y - 2 + hh*1.5;
-  facePut(u0, 0, DECK_Y - 2 + hh*0.5, L, hh, 7.5, w[0]*1.25, w[1]*1.18, w[2]*1.10, 0);
+  const hh = h*0.50;
+  const roofY = faceSlab(u0, L, hh, [w[0]*1.25, w[1]*1.18, w[2]*1.10], near);
   // A NEON STRIP the width of the shop. Reads as a row of businesses.
   facePut(u0, 7.85, DECK_Y + 4.7, L*0.46, 0.34, 0.20,
           D.neon[0], D.neon[1], D.neon[2], neonGlow(seed));
@@ -4136,8 +4241,8 @@ function faceShopfront(D, seed, u0, L, h, w, near){
 }
 
 function faceChapel(D, seed, u0, L, h, w, near){
-  const ll = L*0.62, roofY = DECK_Y - 2 + h*1.5;
-  facePut(u0, 0, DECK_Y - 2 + h*0.5, ll, h, 7.5, w[0]*0.92, w[1]*0.95, w[2]*1.02, 0);
+  const ll = L*0.62;
+  const roofY = faceSlab(u0, ll, h, [w[0]*0.92, w[1]*0.95, w[2]*1.02], near);
   // The spire. Two boxes and a cross — a skyline you can navigate by.
   facePut(u0, 0, roofY + 3.4, ll*0.44, 3.4, 2.8, w[0]*0.80, w[1]*0.82, w[2]*0.90, 0);
   facePut(u0, 0, roofY + 9.0, ll*0.22, 2.8, 1.4, w[0]*0.70, w[1]*0.72, w[2]*0.82, 0);
@@ -4215,7 +4320,7 @@ function cityEdge(axis, i, j, ox, oz){
   for(let u=0; u<BLOCK; ){
     const wx = alongX ? sx0 + u : sx0, wz = alongX ? sz0 : sz0 + u;
     const dd = Math.hypot(wx-ox, wz-oz);
-    const step = dd < 70 ? 8 : dd < 170 ? 16 : 32;
+    const step = dd < 70 ? 8 : dd < 170 ? 16 : dd < 280 ? 32 : 64;
     if(dd <= CITY.R){
       const half = step*0.52;
       cityBox(wx + (alongX ? half : 0), wz + (alongX ? 0 : half), DECK_Y - 0.26,
@@ -4539,7 +4644,9 @@ function drawCity(beat, deckCol){
     const X = i*BLOCK, Z = j*BLOCK;
     for(const [lx, lz, ax] of [[X, Z + BLOCK/2, false], [X + BLOCK/2, Z, true]]){
       const dd = Math.hypot(lx-ox, lz-oz);
-      if(dd > R*0.72) continue;
+      // A fixed radius, not a fraction of R: a lamp standard is four instances
+      // and they stopped being legible long before the fog took them.
+      if(dd > 250) continue;
       const cls = ax ? edgeCls(1, i, j) : edgeCls(0, i, j);
       const hw = halfRoad(cls), tall = cls === 1 ? 4.2 : 7.0;
       for(const sg of [-1, 1]){
@@ -4806,7 +4913,19 @@ function frame(now){
      call to it overwrites this one. Holding `AHEAD` across the place() that
      positions the camera below is what put the eye and the look-at on the
      same point and turned the screen black. */
-  const AHEAD = place(beat + 2.6, 0);
+  /* HOW FAR THROUGH A CORNER THE VIEW IS. Zero on a straight, 1 at the instant
+     the road snaps square across the camera. Both the look-ahead and the trail
+     are measured against it, because both of them are wrong in the same way
+     during a swing and for the same reason. */
+  let swingD = FRAME.o.h - FRAME.camH;
+  swingD -= Math.PI*2*Math.floor((swingD + Math.PI)/(Math.PI*2));
+  const swing = Math.min(1, Math.abs(swingD)/(Math.PI/2));
+  /* THE LOOK-AHEAD SHORTENS INTO A BEND. At a flat 2.6 beats the target sits
+     52 units up the road, which on a straight is exactly the lead a rhythm game
+     wants and inside a quarter-turn is most of the way round the corner — so
+     the camera aims at the new street while the rider is still on the old one
+     and the road you are actually driving slides off the side of the frame. */
+  const AHEAD = place(beat + 2.6 - 1.5*swing, 0);
   const aheadX = AHEAD.x, aheadZ = AHEAD.z;
   // Pulled back for the racer build: you need to read rivals and spheres, not
   // just the next lane. Costs some detail up close; worth it.
@@ -4821,9 +4940,22 @@ function frame(now){
      straight through whatever block is on the corner. Putting the eye at the
      path point 1.45 beats behind means it takes the corner too — it is on the
      road, because it is literally where you were. */
-  const BACK = place(beat - 29/UPB, laneX(camLane)*0.45);
+  /* AND THE TRAIL SHORTENS WITH IT. Twenty-nine units behind is a good chase
+     distance on a straight and a liability at a junction: the eye is still out
+     on the street you are leaving while the target has moved onto the one you
+     are joining, so the LINE BETWEEN THEM cuts the corner — and the corner is
+     where a building is. That is the "camera rotates and the magic goes" frame:
+     the view passing through, or a foot from, a block of tenement.
+
+     Pulling the eye in to twelve units through the swing keeps it near the
+     middle of the junction, which is the one piece of ground the lattice
+     guarantees is empty — the block corners are left open precisely so a
+     junction is see-through. It goes back out as the view comes level. */
+  const BACK = place(beat - (29 - 17*swing)/UPB, laneX(camLane)*0.45);
   const backX = BACK.x, backZ = BACK.z;
-  const chaseEye=[backX, camY+8.4+bob, backZ];
+  // A little higher through the corner as well, so the eye clears the kerbside
+  // furniture it is now much closer to.
+  const chaseEye=[backX, camY+8.4+bob+2.6*swing, backZ];
   const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, aheadZ];
 
   /* SIDE VIEW. Looking along -X, so world -Z becomes screen-right: the track
@@ -4950,20 +5082,33 @@ function frame(now){
       pushInst(MESH_BOX, P.x, DECK_Y+0.03, P.z, 0.055, 0.03, 1.5,
                DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yw);
     }
-    if(!open){                                          // causeway carries side rails
-      for(const sx of [-1,1]){
-        P = place(b, sx*(hwz+0.75));
-        pushInst(MESH_BOX, P.x, DECK_Y+0.5, P.z, 0.10, 0.42, 1.4,
-                 DECK[0]*1.6, DECK[1]*1.5, DECK[2]*1.5, 0,0, 0.05, yw);
+    /* A STREET IS NOT A CAUSEWAY. Rails and legs are Atlantica's structure —
+       salvage timber bolted over open water — and drawing them in Soul Town
+       put a fence down both sides of the road and stilts underneath it. The
+       street stopped touching the city: a raised object running THROUGH the
+       town rather than a road that is PART of it, which is exactly the
+       alienation of a viaduct and exactly what was wrong with it.
+
+       In the city the kerb does this job, and it is already there: the ground
+       slabs stand a hand's width proud of the carriageway on every side, so
+       the road is a channel cut into the ground rather than a deck laid on
+       top of it. Nothing to draw. */
+    if(TRACK.world !== 'street'){
+      if(!open){                                        // causeway carries side rails
+        for(const sx of [-1,1]){
+          P = place(b, sx*(hwz+0.75));
+          pushInst(MESH_BOX, P.x, DECK_Y+0.5, P.z, 0.10, 0.42, 1.4,
+                   DECK[0]*1.6, DECK[1]*1.5, DECK[2]*1.5, 0,0, 0.05, yw);
+        }
       }
-    }
-    // Legs every 24 units ALONG THE ROAD — measured in world distance now, so
-    // they stay evenly spaced through a corner instead of pooling in it.
-    if(Math.round(b*UPB) % 24 < 6){
-      for(const sx of [-1,1]){
-        P = place(b, sx*(hwz+0.5));
-        pushInst(MESH_BOX, P.x, DECK_Y-3.4, P.z, 0.30, 3.3, 0.30,
-                 DECK[0]*0.65, DECK[1]*0.65, DECK[2]*0.65, 0,0, 0, yw);
+      // Legs every 24 units ALONG THE ROAD — measured in world distance now, so
+      // they stay evenly spaced through a corner instead of pooling in it.
+      if(Math.round(b*UPB) % 24 < 6){
+        for(const sx of [-1,1]){
+          P = place(b, sx*(hwz+0.5));
+          pushInst(MESH_BOX, P.x, DECK_Y-3.4, P.z, 0.30, 3.3, 0.30,
+                   DECK[0]*0.65, DECK[1]*0.65, DECK[2]*0.65, 0,0, 0, yw);
+        }
       }
     }
   }
@@ -5213,6 +5358,53 @@ function frame(now){
   const downRoll = Game.down() ? Game.downSide * Math.min(1.5, downT*3.0) : 0;
   drawSaige(px, py, PLAYER_Z, lean + downRoll, pitch,
             RIDER.ringA, RIDER.ringB, Game.down() ? 0.35 : 1);
+
+  /* ── LIFT ─────────────────────────────────────────────────────────
+     In the melody layer the Saige is genuinely FLYING — the deck is twenty
+     units below it and the altitude is the note being played — and nothing on
+     the vehicle said so. It read as the same machine on the same road with the
+     camera moved, which quietly undercut the one idea the layer is built on.
+
+     So it puts its weight on something. Two jets under the hull, thrown DOWN
+     and fading over about two units, in the ring colours the vehicle already
+     carries: warm forward, cool aft, so the thrust belongs to the Saige rather
+     than being generic exhaust. Their length breathes on the beat and jitters a
+     little per frame, because a hovering thing is never quite still — a jet at
+     constant length looks like a bar bolted to the underside.
+
+     All of it scales with sideMix, so it grows out of the machine as the view
+     turns and is completely absent in chase view, where the wheels are down.
+
+     Drawn AFTER the hull. The instanced pass has no blending, so the jets are
+     opaque geometry: they must be small, under the silhouette, and never in
+     front of the thing you are steering. */
+  if(Game.sideMix > 0.02){
+    const lift = Game.sideMix;
+    // Thrust breathes on the beat: a hovering thing is never quite still, and
+    // a jet at constant length looks like a bar bolted to the underside.
+    const puff = 0.78 + 0.22*Math.sin(beat*Math.PI*2) + pulse*0.30;
+    /* TWO PLUMES, not a ring. A torus was tried here first and cut for the
+       same reason the accent halo was: it is a big opaque hoop of geometry
+       hanging under the machine, and it read as a prop the Saige was sitting
+       in rather than as air being pushed. Thrust is a TAPER — bright and tight
+       at the nozzle, wide and faint at the bottom — and five stacked spheres
+       per side say that in ten instances.
+
+       Warm forward and cool aft, the same Day/Night poles the hull's rings
+       carry, so the lift belongs to this vehicle rather than being exhaust. */
+    for(const [dz, col] of [[-1.15, RIDER.ringA], [1.05, RIDER.ringB]]){
+      for(let k=0;k<5;k++){
+        const u = k/4;                                    // 0 at the nozzle, 1 at the tip
+        const drop = (0.35 + u*3.1) * puff * lift;
+        const r    = (0.20 + u*0.30) * lift;              // widens as it falls
+        const len  = (0.34 + u*0.34) * puff * lift;
+        const jit  = (Math.random()-0.5)*0.10*u;          // the tail wanders
+        pushInst(MESH_SPH, px + jit, py + 0.34 - drop, PLAYER_Z + dz + jit*0.6,
+                 r, len, r, col[0], col[1], col[2], 0, 0,
+                 (1.35 - u*1.15)*lift);                   // burns out downward
+      }
+    }
+  }
 
   // wind shadow — the Flow trail behind the Saige
   // A wind shadow is calmed water, so it wants to be a WIDE soft ribbon. Scaling
