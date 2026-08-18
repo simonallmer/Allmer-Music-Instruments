@@ -3987,9 +3987,31 @@ gate.addEventListener('click', ()=>{
 const CITY = { sink:0, yaw:0, R:450, beat:0, deck:[0.1,0.1,0.1], armed:0, live:false };
 const CITY_SINK = 150;              // clears the tallest blade sign in the town
 
-function cityVis(wx, wz){
+/* THE CULL KNOWS HOW BIG THE THING IS.
+
+   This tested an object's CENTRE against a depth slab, which is correct only
+   for objects small enough that their centre stands for them. The ground is
+   not: a cell's slab is 141 units across, so its centre can be well behind the
+   camera plane while most of the slab is in front of you — and being behind
+   the plane is what got it thrown away. Straight down a street you never saw
+   it, because the cells you are driving over have their centres ahead of you.
+   Swing through a corner and the frame rotates over cells whose centres are
+   now beside and behind you, and the floor under a third of the screen stops
+   being drawn for as long as the swing lasts. That is the missing ground.
+
+   Measured mid-turn before the fix: 5 cells dropped, the worst with its centre
+   at view z +70 and its nearest corner at −29, i.e. thirty units in FRONT of
+   the rider and dead centre of frame.
+
+   So callers pass their depth half-extent and the slab is widened by it. Exact
+   rather than approximate — a box specified in world axes reaches
+   |sx·sin| + |sz·cos| along the view's z — because a square slab at 45° reaches
+   a factor of 1.41 further than its own half-width, and an approximation that
+   is wrong by 41% on the largest object in the scene is the bug again. */
+function cityVis(wx, wz, ez){
   viewInto(wx, wz, FRAME.o, FRAME.ch, FRAME.sh, VW);
-  return VW.z < 30 && VW.z > -505;      // to the fog limit, not to the old radius
+  const e = ez || 0;
+  return VW.z < 30 + e && VW.z > -505 - e;
 }
 /* Every prop in the city goes through here: world position in, view position
    out, frustum cull and side-view sink folded in. Sizes are WORLD-axis half
@@ -3997,11 +4019,11 @@ function cityVis(wx, wz){
    axes comes out square to the street it is standing on whichever street that
    is, and there is only ever one yaw to get right. */
 function cityBox(wx, wz, y, sx, sy, sz, r, g, b, glow){
-  if(!cityVis(wx, wz)) return;
+  if(!cityVis(wx, wz, Math.abs(sx*FRAME.sh) + Math.abs(sz*FRAME.ch))) return;
   pushInst(MESH_BOX, VW.x, y - CITY.sink, VW.z, sx, sy, sz, r, g, b, 0, 0, glow, CITY.yaw);
 }
 function citySph(wx, wz, y, rr, r, g, b, glow){
-  if(!cityVis(wx, wz)) return;
+  if(!cityVis(wx, wz, rr)) return;
   pushInst(MESH_SPH, VW.x, y - CITY.sink, VW.z, rr, rr, rr, r, g, b, 0, 0, glow);
 }
 
