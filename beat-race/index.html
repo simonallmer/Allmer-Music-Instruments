@@ -97,6 +97,26 @@
   #pause .vol input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;
     background:var(--ink);cursor:pointer}
 
+  /* THE TOUCH HINT. Shown once, on coarse pointers only, and gone after five
+     seconds or on the first touch — whichever comes first. A control legend
+     that stays up is clutter; one that never appears leaves a phone player
+     guessing at a game with no visible buttons. */
+  #thint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:14;
+    display:none;grid-auto-flow:row;gap:9px;justify-items:center;
+    padding:18px 26px;border-radius:14px;
+    border:1px solid var(--line);background:rgba(6,13,20,.82);backdrop-filter:blur(12px);
+    pointer-events:none;transition:opacity .45s ease}
+  #thint.on{display:grid}
+  #thint.fade{opacity:0}
+  #thint .r{display:flex;align-items:center;gap:11px;font-size:10px;
+    letter-spacing:.18em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+  #thint .r b{color:var(--ink);font-weight:400;font-size:15px;width:26px;text-align:center}
+  @media (hover:none) and (pointer:coarse){
+    #thint.arm{display:grid}
+    /* No keyboard legend on a phone — the swipe hint covers it a second later. */
+    #gate .keys{display:none}
+  }
+
   /* AUTORIDE badge. Deliberately obvious — a demo mode that is not clearly
      signposted reads as the controls having stopped working. */
   #auto{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:11;
@@ -110,7 +130,14 @@
   @keyframes autopulse{0%,100%{opacity:1}50%{opacity:.25}}
 
   @media (max-width:640px){ #mix{left:8px;gap:5px} .stem .tr{width:52px} .stem .nm{width:34px}
-    #pausebtn{top:auto;bottom:14px;left:14px} }
+    #pausebtn{top:auto;bottom:14px;left:14px}
+    /* The status line ran full-bleed into the pause button and off both edges on
+       a 375px screen. Pad it clear of the button and let it wrap. */
+    /* Inset the ELEMENT, not just its padding — a full-bleed box still sits
+       under the pause button even when the text inside it is padded clear. */
+    #sect{left:56px;right:56px;font-size:8px;letter-spacing:.13em;line-height:1.6}
+    #mult .x{font-size:30px}
+    #auto{bottom:56px;font-size:8px;letter-spacing:.18em;padding:5px 11px} }
 </style>
 
 <canvas id="c"></canvas>
@@ -126,6 +153,11 @@
 
 <div id="flow"><div class="n" id="flowN">0</div><div class="l">flow</div></div>
 <div id="mult"><div class="x">×1</div><div class="l">multiplier</div></div>
+<div id="thint">
+  <div class="r"><b>&#8596;</b>swipe to move</div>
+  <div class="r"><b>&#8593;</b>swipe up to jump</div>
+  <div class="r"><b>&#8595;</b>swipe down for side view</div>
+</div>
 <div id="auto"><i></i>Autoride &nbsp;·&nbsp; arrow key to take over</div>
 <div id="judge"></div>
 <div id="sect"></div>
@@ -140,28 +172,24 @@
       <input id="vol" type="range" min="0" max="100" step="1" value="80">
       <span id="vol_v">80</span>
     </div>
+    <div class="k" id="autobtn">Autoride</div>
     <div class="k">Resume</div>
-    <div class="hint">Esc or P &nbsp;·&nbsp; M to mute</div>
+    <div class="hint">Esc or P &nbsp;·&nbsp; M to mute &nbsp;·&nbsp; R autoride</div>
   </div>
 </div>
 
 <div id="gate">
   <h2>Beat Race</h2>
   <div class="track">Track 01 — Atlantica</div>
-  <p>Five frets, one instrument. The lanes are five notes of the same lead voice — a run of orbs is a <b>riff</b>, not a list. The band plays the floor; you play the line over it.</p>
-  <p><b>The big orbs are the ones that matter.</b> Every phrase opens on an accent: it hits harder, it rings an octave up, and the whole mix flinches underneath it. The small ones are the body of the phrase, the tiny ones are ghosts. Miss the accents and there is no song.</p>
-  <p>The rests are part of it. Notes come in figures with silence between them — that silence is what makes the next accent land.</p>
-  <p><b>Barriers sit in the gaps.</b> They only ever appear where there are no notes, so jumping never costs you a note — but clip one and you drop a gear and slow down. Your streak survives; your speed doesn't.</p>
-  <p>Chain notes to build your <b>streak</b>. Eight links steps the multiplier, and every eight after that; the tempo shifts with it and the chart subdivides behind it. A miss takes it all back to ×1.</p>
+  <p>Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>.
+     Jump the barriers or you slow down.</p>
   <div class="keys">
-    <b>&larr; &rarr;</b><span>change lane — snaps to the 8th · at a junction, press outward to take the fork</span>
-    <b>&uarr;</b><span><b>jump</b> — clears barriers and gates · pitch up in melody (again at the top = octave)</span>
-    <b>&darr;</b><span>pitch down in melody (again at the bottom = octave)</span>
-    <b>SPACE</b><span><b>switch layer</b> — frets &rlarr; melody. Lands on the next bar.</span>
-    <b>R</b><span><b>autoride</b> — it plays the line perfectly. Any arrow takes the wheel back.</span>
+    <b>&larr; &rarr;</b><span>move</span>
+    <b>&uarr;</b><span>jump</span>
+    <b>SPACE</b><span>switch view</span>
+    <b>R</b><span>autoride</span>
   </div>
-  <p>On a phone: swipe left/right to move, up to jump, tap to switch layer.</p>
-  <div class="k">Click to start</div>
+  <div class="k" id="startk">Click to start</div>
 </div>
 
 <script>
@@ -1739,7 +1767,7 @@ const Game = {
   jumpAt:-99,
   lead:0,                                  // race position, in world units
   downedUntil:-99, downSide:0,
-  inMelody:false, sideMix:0, octave:0,     // melody layer: side view, altitude = pitch
+  inMelody:false, sideMix:0, octave:0, sideCamY:null,     // melody layer: side view, altitude = pitch
   melodyRequest:false, togglePending:-1, lastSectionWants:false,
 
   /* TOGGLE THE LAYER — spacebar, any time.
@@ -2142,30 +2170,74 @@ document.addEventListener('visibilitychange', ()=>{
 pauseEl.addEventListener('click', ()=> setPause(false));
 document.getElementById('pausebtn').addEventListener('click', e=>{
   e.stopPropagation(); setPause(!Clock.paused); });
-/* ── TOUCH ──────────────────────────────────────────────────────────────
-   Swipe left/right to move, up to jump, tap to switch layer. It mirrors the
-   keyboard exactly, which is the point: with only one system to learn there is
-   nothing the phone has to do differently. */
+/* ── TOUCH — four gestures, and that is the whole phone build ────────────
+     swipe ← →   move (a lane in chase view, a pitch in side view)
+     swipe ↑     jump
+     swipe ↓     switch view
+
+   Left/right drives the slot in BOTH layers. The five slots are laid out
+   vertically in side view, so mapping them to a horizontal swipe is technically
+   a mismatch — but the alternative is a fifth gesture, and the whole point of
+   this scheme is that there are only ever four. Right is up the neck, left is
+   down it, which is the fret order you already read left-to-right on the deck.
+
+   Tap no longer switches the layer: swipe-down owns that now, and leaving tap
+   bound as well meant every mistimed swipe toggled the camera. */
 let tsx=0, tsy=0, tsw=false;
 addEventListener('touchstart', e=>{ const t=e.changedTouches[0];
-  tsx=t.clientX; tsy=t.clientY; tsw=false; }, {passive:true});
+  tsx=t.clientX; tsy=t.clientY; tsw=false; hideTouchHint(); }, {passive:true});
 addEventListener('touchmove', e=>{
   if(tsw || Clock.paused) return;
   const t=e.changedTouches[0], dx=t.clientX-tsx, dy=t.clientY-tsy;
   if(Math.hypot(dx,dy) < 26) return;
   tsw = true;
   if(Game.auto){ Game.auto = false; judge('AUTORIDE OFF', '#7f97a8'); }
-  const horiz = Math.abs(dx) > Math.abs(dy);
-  // Swipes are now purely the right hand's job: step, jump, octave, fork.
-  if(Game.inMelody){ if(!horiz) Game.tryLane(dy<0 ? +1 : -1); }
-  else if(horiz) Game.tryLane(dx>0?1:-1);
-  else if(dy < 0) Game.jump();
+  if(Math.abs(dx) > Math.abs(dy)) Game.tryLane(dx>0 ? 1 : -1);   // move / pitch
+  else if(dy < 0) Game.jump();                                   // up = jump
+  else Game.toggleLayer();                                       // down = switch view
 }, {passive:true});
-// A tap switches layer — the touch equivalent of spacebar.
-addEventListener('touchend', ()=>{ if(!tsw && !Clock.paused) Game.toggleLayer(); }, {passive:true});
+
+/* The hint arms itself when the run starts and takes itself down after five
+   seconds, or on the first touch. `arm` is what the coarse-pointer media query
+   keys off, so it never appears on a desktop at all. */
+const thintEl = document.getElementById('thint');
+let thintTimer = null;
+function showTouchHint(){
+  thintEl.classList.add('arm'); thintEl.classList.remove('fade');
+  clearTimeout(thintTimer);
+  thintTimer = setTimeout(hideTouchHint, 5000);
+}
+function hideTouchHint(){
+  if(!thintEl.classList.contains('arm')) return;
+  clearTimeout(thintTimer);
+  thintEl.classList.add('fade');
+  setTimeout(()=>thintEl.classList.remove('arm','fade'), 480);
+}
+
+/* Autoride from the pause panel. On a phone there is no R key, and autoride is
+   the one control with nowhere else to live once the gesture set is capped at
+   four. Pausing is the natural place to reach for it. */
+const autoBtnEl = document.getElementById('autobtn');
+autoBtnEl.addEventListener('click', e=>{
+  e.stopPropagation();
+  /* Arm autoride BEFORE resuming, and set the flag directly rather than going
+     through toggleAuto(). Clock.resume() is asynchronous — it clears `paused`
+     inside ctx.resume().then(...) — so calling toggleAuto() straight after
+     setPause(false) hits its own `if(Clock.paused) return` guard and silently
+     does nothing. autoStep() checks `paused` itself, so nothing actually moves
+     until the context is back. */
+  if(!Game.auto){ Game.auto = true; judge('AUTORIDE', '#f5a93c'); Clock.latch(); }
+  setPause(false);
+});
+
+// Coarse pointers get "Tap", never see the keyboard legend (CSS above), and get
+// the short form of the junction hint — there is no room for the long one.
+const TOUCH = matchMedia('(hover:none) and (pointer:coarse)').matches;
+if(TOUCH) document.getElementById('startk').textContent = 'Tap to start';
 
 const gate = document.getElementById('gate');
-gate.addEventListener('click', ()=>{ Clock.start(); gate.classList.add('hide'); }, {once:true});
+gate.addEventListener('click', ()=>{
+  Clock.start(); gate.classList.add('hide'); showTouchHint(); }, {once:true});
 
 /* ── resize ────────────────────────────────────────────────────────────── */
 let W=1,H=1;
@@ -2291,7 +2363,14 @@ function frame(now){
   Game.laneVis += (Game.lane - Game.laneVis) * Math.min(1, dt*13);
   Game.slide *= Math.max(0, 1 - dt*4.5);
   const cx0 = centerX(beat);
-  const px = cx0 + laneX(Game.laneVis) + Game.slide*1.5;
+  /* In the melody layer the lane is expressed as ALTITUDE, so the lateral
+     offset has to collapse — exactly as the chart objects already do with
+     `laneX(e.lane)*(1-mm)`. It did not, and the rider was the only thing in the
+     scene still using the lateral axis: it drifted off the plane the notes sit
+     on, and swung between 39 and 53 units from the side camera as the pitch
+     changed, growing and shrinking with it. Blending it here puts the rider
+     back on the same plane as the notes it is catching. */
+  const px = cx0 + laneX(Game.laneVis)*(1 - Game.sideMix) + Game.slide*1.5;
   const lean = (Game.lane - Game.laneVis)*0.42 + Game.slide*0.30
              + (centerX(beat+1.2) - cx0)*0.05;          // bank into the branch
 
@@ -2363,8 +2442,37 @@ function frame(now){
      runs off to the right and notes arrive from there, while altitude reads
      vertically. It is the same world and the same chart — only the axis you
      read changes, which is what makes this a layer rather than a camera trick. */
-  const sideEye=[cx0 + 46, ALT_BASE + 6.0 + bob*0.5, PLAYER_Z - 24];
-  const sideCtr=[cx0,      ALT_BASE + 5.2,           PLAYER_Z - 24];
+  /* SIDE VIEW: KEEP THE RIDER IN FRAME.
+     The camera used to look at a FIXED height (ALT_BASE + 5.2) while the player
+     flies across the whole 12.8-unit pitch range — so at the top degree you were
+     near the ceiling, at the bottom near the floor, and easy to lose.
+
+     It does not simply follow you, though: locking the camera to the rider makes
+     the five staff lines slide around, and those lines are the only thing
+     stating the vertical axis. So it follows PART of the way — 62% from the
+     middle of the staff toward you. That is enough that you are always inside
+     the middle band of the screen, and little enough that the staff stays put
+     as a pitch reference. Damped, so a fast run of degrees does not swing it.
+
+     The look-at also moved from PLAYER_Z-24 to PLAYER_Z-15, which brings you in
+     from the edge without giving up the beats of lookahead a rhythm game needs
+     — notes still arrive from screen-right with room to read them. */
+  const staffMid = ALT_BASE + 2*ALT_STEP;
+  const sideTarget = staffMid + (flyY - staffMid)*0.62;
+  if(Game.sideCamY === null) Game.sideCamY = sideTarget;
+  Game.sideCamY += (sideTarget - Game.sideCamY) * Math.min(1, dt*4.2);
+  /* HORIZONTAL: hold the rider at a fixed fraction of the SCREEN, not a fixed
+     distance in the world. The look-ahead was a flat 15 units, which is a mild
+     offset on a 2:1 desktop window and shoves the rider onto the left edge of a
+     375px phone — the visible width at the camera's distance collapses with the
+     aspect ratio, so the same 15 units eats most of it.
+     Deriving it from the frustum keeps the rider ~1/3 in from the left at every
+     screen shape, with the rest of the width left for notes to arrive into. */
+  const sideAsp  = W/H;
+  const sideHalfX = Math.atan(Math.tan((60 + (44-60)*Game.sideMix)*Math.PI/360) * sideAsp);
+  const sideLead = 0.34 * 46 * Math.tan(sideHalfX);
+  const sideEye=[cx0 + 46, Game.sideCamY + 0.8 + bob*0.5, PLAYER_Z - sideLead];
+  const sideCtr=[cx0,      Game.sideCamY,                 PLAYER_Z - sideLead];
   const m = Game.sideMix, lerp3 = (a,b)=>[a[0]+(b[0]-a[0])*m, a[1]+(b[1]-a[1])*m, a[2]+(b[2]-a[2])*m];
   const eye = lerp3(chaseEye, sideEye);
   const ctr = lerp3(chaseCtr, sideCtr);
@@ -2741,7 +2849,8 @@ function frame(now){
   flowNEl.textContent = Game.flowChain;
   flowEl.classList.toggle('on', Game.flowChain > 1);
   sectEl.textContent = Clock.started
-    ? (bj ? '◄ lane 0 + LEFT = melody          ·          lane 4 + RIGHT = arrangement ►'
+    ? (bj ? (TOUCH ? '◄ SWIPE OUT AT AN EDGE TO FORK ►'
+                   : '◄ lane 0 + LEFT = melody          ·          lane 4 + RIGHT = arrangement ►')
           : TRACK_NAME + '  ·  ' + sec.name
             + (Game.inMelody ? '  ·  ↑↓ = pitch  ·  again at the ends = octave'
                              : (Game.mult > 1 ? '  ·  ×' + Game.mult : '')))
