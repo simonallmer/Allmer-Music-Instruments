@@ -75,6 +75,15 @@
   #gate .k{border:1px solid var(--line);border-radius:6px;padding:9px 22px;font-size:10px;
     letter-spacing:.22em;text-transform:uppercase;margin-top:4px}
   #gate.hide{display:none}
+  /* THE TRACK PICKER. Two tracks now, so the gate has to ask — and it has to
+     ask before the audio graph exists, because tempo, scale and echo are all
+     properties of the track rather than settings on top of one. */
+  #gate .picks{display:flex;gap:8px;margin:2px 0 4px}
+  #gate .pick{border:1px solid var(--line);border-radius:6px;padding:7px 16px;
+    font-size:10px;letter-spacing:.20em;text-transform:uppercase;color:var(--dim);
+    cursor:pointer;transition:color .12s,border-color .12s,background .12s}
+  #gate .pick.on{color:var(--ink);border-color:rgba(127,151,168,.55);
+    background:rgba(127,151,168,.10)}
 
   #pausebtn{position:fixed;top:14px;left:14px;z-index:12;width:32px;height:32px;
     display:grid;place-content:center;border:1px solid var(--line);border-radius:7px;
@@ -228,8 +237,12 @@
 
 <div id="gate">
   <h2>Beat Race</h2>
-  <div class="track">Track 01 — Atlantica</div>
-  <p>Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>.
+  <div class="picks">
+    <div class="pick on" data-track="atlantica">Atlantica</div>
+    <div class="pick" data-track="soultown">Soul Town</div>
+  </div>
+  <div class="track" id="gtrack">Track 01 — Atlantica</div>
+  <p id="gblurb">Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>.
      Jump the barriers or you slow down.</p>
   <div class="keys">
     <b>&larr; &rarr;</b><span>move</span>
@@ -263,7 +276,7 @@ const PLAYER_Z = -15;              // player's fixed z; the world comes to them
 const DECK_Y = 4.6;
 // House tempos. The old top gear (170) is not four-to-the-floor any more, it is
 // hard techno — the kick stops swinging and starts machine-gunning.
-const GEARS = [120, 126, 134, 146];
+let GEARS = [120, 126, 134, 146];      // per track; selectTrack() rebinds
 const CURVE_W = 27;                // lateral offset a branch moves the centreline
 const JUNC_LEAD = 16;              // beats between committing a branch and riding it
 const laneX = l => (l - 2) * LANE_W;
@@ -355,8 +368,10 @@ function waveH(x, z, t, amp){
   return h;
 }
 
-/* ── palette ───────────────────────────────────────────────────────────── */
-const PAL = {
+/* ── palettes ──────────────────────────────────────────────────────────
+   One per world. `tod` runs 0→1 across the first 220 beats, so every track is
+   a long night turning over into morning — the same arc, two different nights. */
+const PAL_WATER = {
   night:{ zenith:[0.031,0.055,0.106], mid:[0.055,0.145,0.231], horizon:[0.208,0.372,0.451],
           sun:[0.541,0.831,0.902], deep:[0.035,0.098,0.157], body:[0.078,0.243,0.333],
           crest:[0.639,0.906,0.945], sunDir:[-0.35,0.28,-0.9], silh:[0.031,0.075,0.114] },
@@ -364,6 +379,21 @@ const PAL = {
           sun:[1.000,0.780,0.451], deep:[0.184,0.100,0.239], body:[0.455,0.224,0.376],
           crest:[0.988,0.827,0.706], sunDir:[0.30,0.20,-0.93], silh:[0.086,0.043,0.098] }
 };
+/* SOUL TOWN. Sodium and indigo — the two colours of a city street at night and
+   nothing else. The "ocean" here is WET ASPHALT: `deep` is the road, `body` the
+   sheen on it, and `crest` is the streetlight lying in the water, which is why
+   it is the brightest thing in the palette and warm rather than white. `sun`
+   sits low and orange because there is no sun — it is the glow of the town
+   itself coming back off the underside of the cloud. */
+const PAL_STREET = {
+  night:{ zenith:[0.020,0.024,0.055], mid:[0.062,0.058,0.118], horizon:[0.420,0.235,0.130],
+          sun:[1.000,0.620,0.280], deep:[0.028,0.028,0.040], body:[0.070,0.066,0.086],
+          crest:[0.960,0.585,0.270], sunDir:[-0.30,0.16,-0.94], silh:[0.030,0.028,0.050] },
+  day:  { zenith:[0.196,0.157,0.278], mid:[0.478,0.318,0.322], horizon:[0.918,0.616,0.357],
+          sun:[1.000,0.839,0.549], deep:[0.098,0.090,0.106], body:[0.204,0.180,0.200],
+          crest:[1.000,0.855,0.620], sunDir:[0.28,0.16,-0.95], silh:[0.090,0.072,0.102] }
+};
+let PAL = PAL_WATER;
 const mixArr = (a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t);
 
 /* ══ shaders ═══════════════════════════════════════════════════════════ */
@@ -714,7 +744,7 @@ function hullGeo(){
     id.push(b,b+1,b+2); }
   return [p,n,id];
 }
-const MESH_BOX  = makeMesh(...boxGeo(),   1400);
+const MESH_BOX  = makeMesh(...boxGeo(),   2600);   // Soul Town's blocks and lamps live here too
 const MESH_SPH  = makeMesh(...sphereGeo(), 460);
 const MESH_HULL = makeMesh(...hullGeo(),    12);
 const MESH_TOR  = makeMesh(...torusGeo(),   16);
@@ -931,7 +961,61 @@ const PATTERNS = {
     {s:0,  lane:2, t:'jump'},
     {s:4,  lane:2, a:2}, {s:8,  lane:3, a:1},
     {s:16, lane:3, a:2}, {s:20, lane:2, a:1},
-    {s:26, lane:1, a:2} ]}
+    {s:26, lane:1, a:2} ]},
+
+  /* ══ SOUL TOWN ══════════════════════════════════════════════════════
+     The charts move differently because the music does. Atlantica is house:
+     the phrases push AHEAD of the grid, syncopated off the 8th, leaning into
+     the next bar. Motown sits BACK on it — the whole feel of the era is the
+     backbeat arriving a hair late and everything else waiting for it.
+
+     So these figures land on and around beats 2 and 4 (steps 4 and 12) rather
+     than crowding the downbeat, they answer themselves in call-and-response
+     pairs the way a lead and a backing trio do, and they move mostly by step
+     rather than by leap. Fewer notes than Atlantica, further apart, each one
+     worth more. You are the singer here, not the drummer. */
+  soulEasy: { bars:2, ev:[
+    {s:0,  lane:2, a:2}, {s:4,  lane:3, a:1}, {s:6,  lane:2, a:1},
+    {s:12, lane:1, a:2}, {s:14, lane:2, a:1},
+    {s:16, lane:2, a:2}, {s:20, lane:3, a:1},
+    {s:24, lane:4, a:2}, {s:28, lane:3, a:1} ]},
+
+  // CALL on the first bar, ANSWER on the second, a fret lower — the oldest
+  // trick in gospel and the reason a Motown verse never feels like a loop.
+  soulVerse: { bars:2, ev:[
+    {s:0,  lane:1, a:2}, {s:2,  lane:1, a:1}, {s:6,  lane:2, a:1},
+    {s:8,  lane:1, a:2}, {s:12, lane:0, a:1},
+    {s:16, lane:1, a:2}, {s:19, lane:2, a:1}, {s:22, lane:3, a:1},
+    {s:24, lane:2, a:2}, {s:30, lane:1, a:1},
+    {s:26, lane:4, t:'haz'} ]},
+
+  // THE HOOK. Top of the range, and it opens on the highest note in the track —
+  // a chorus in this idiom is someone stepping up to the microphone.
+  soulChorus: { bars:2, ev:[
+    {s:0,  lane:4, a:2}, {s:2,  lane:3, a:1}, {s:4,  lane:4, a:1},
+    {s:8,  lane:3, a:2}, {s:10, lane:2, a:1}, {s:12, lane:3, a:1},
+    {s:16, lane:4, a:2}, {s:20, lane:3, a:1}, {s:22, lane:2, a:1},
+    {s:24, lane:1, a:2}, {s:28, lane:2, a:1}, {s:30, lane:3, a:1},
+    {s:0,  lane:2, t:'jump'} ]},
+
+  // THE LATE SET — almost nothing. Four notes in two bars, and the room.
+  soulBridge: { bars:2, ev:[
+    {s:0,  lane:2, t:'jump'},
+    {s:4,  lane:2, a:2}, {s:10, lane:3, a:1},
+    {s:16, lane:3, a:2}, {s:22, lane:2, a:1}, {s:28, lane:1, a:2} ]},
+
+  // BACK LOT / NEON ROW — three lanes, so three notes, and the line has to say
+  // more with less. Straight quarters: a side street is where the groove gets
+  // simpler, not busier.
+  soulAlley: { bars:2, span:[1,3], ev:[
+    {s:0,  lane:2, a:2}, {s:4,  lane:1, a:1}, {s:8,  lane:2, a:2}, {s:12, lane:3, a:1},
+    {s:16, lane:2, a:2}, {s:20, lane:1, a:1}, {s:24, lane:2, a:2}, {s:28, lane:3, a:1} ]},
+
+  // THE RISING — the melody layer. A gospel climb and a step back down.
+  soulAscent: { bars:2, ev:[
+    {s:0,  lane:0, a:2}, {s:4,  lane:1, a:1}, {s:8,  lane:2, a:1}, {s:12, lane:3, a:1},
+    {s:16, lane:4, a:2}, {s:20, lane:3, a:1}, {s:24, lane:2, a:2}, {s:28, lane:3, a:1},
+    {s:14, lane:0, t:'haz'} ]}
 };
 
 /* Charts must WALK, and this is checked rather than trusted — an unreachable
@@ -971,8 +1055,8 @@ validateCharts();
    decision, it is a hard requirement: objects render ~320 units ahead, and at
    20 units/beat that is 16 beats of geometry that must already exist.         */
 // TRACK 01 — ATLANTICA. The city on the water; the nodes are its districts.
-const TRACK_NAME = 'Atlantica';
-const NODES = {
+let TRACK_NAME = 'Atlantica';
+const NODES_WATER = {
   /* EVERY left fork reaches the melody layer, from anywhere, on the first
      junction. It previously took two chained forks — 31 seconds of precise play
      — which buried the most interesting thing in the game behind a corridor
@@ -998,6 +1082,25 @@ const NODES = {
   // choice of what KIND of music you play next, not just where you drive.
   ascent:  { name:'The Ascent',      bars:8, kind:'melody',   pat:'ascent', exits:{L:'ascent',   S:'causeway', R:'open'    } }
 };
+
+/* ── TRACK 02 — SOUL TOWN ───────────────────────────────────────────────
+   Inner city, one in the morning, 1965. The nodes are blocks rather than
+   districts, named for where a record like this got made and where it got
+   played. The graph is the SAME SHAPE as Atlantica — eight-bar blocks, a
+   junction at each midpoint, six-bar side streets that always rejoin — so
+   every invariant the route machinery already relies on stays true. */
+const NODES_STREET = {
+  motorrow: { name:'Motor Row',      bars:8, kind:'causeway', pat:'soulEasy',   exits:{L:'rising', S:'twelfth',   R:'backlot'} },
+  twelfth:  { name:'Twelfth Street', bars:8, kind:'causeway', pat:'soulVerse',  exits:{L:'rising', S:'twelfth',   R:'backlot'} },
+  hitsville:{ name:'Hitsville',      bars:8, kind:'open',     pat:'soulChorus', exits:{L:'rising', S:'hitsville', R:'neonrow'} },
+  grand:    { name:'Grand River',    bars:8, kind:'causeway', pat:'soulVerse',  exits:{L:'rising', S:'hitsville', R:'backlot'} },
+  lateset:  { name:'The Late Set',   bars:8, kind:'open',     pat:'soulBridge', exits:{L:'rising', S:'hitsville', R:'neonrow'} },
+  backlot:  { name:'Back Lot',       bars:6, kind:'causeway', lanes:3, pat:'soulAlley', exits:{L:'twelfth',   S:'twelfth',   R:'grand'  } },
+  neonrow:  { name:'Neon Row',       bars:6, kind:'open',     lanes:3, pat:'soulAlley', exits:{L:'hitsville', S:'hitsville', R:'lateset'} },
+  rising:   { name:'The Rising',     bars:8, kind:'melody',   pat:'soulAscent', exits:{L:'rising',    S:'twelfth',   R:'hitsville'} }
+};
+let NODES = NODES_WATER;
+
 const ALT_BASE = DECK_Y + 1.8, ALT_STEP = 3.2;   // altitude band per scale degree
 const altY = l => ALT_BASE + l*ALT_STEP;
 
@@ -1112,7 +1215,7 @@ function pushNode(key, choice){
   EVENTS.push({ beat: ent.junctionBeat, lane:-1, t:'junction', done:false, committed:false, ent });
   return ent;
 }
-pushNode('shallows', 'S');
+// The first node is pushed by selectTrack(), once a track has been chosen.
 
 function routeIndexAt(b){
   for(let i=ROUTE.length-1;i>=0;i--) if(b >= ROUTE[i].startBeat) return i;
@@ -1211,32 +1314,106 @@ const ORB_DEG = l => 7 + l*2;        // D3 · G3 · C4 · E4 · A4
    makes "you cannot play a wrong note, only a different one" literally true,
    and it is the precondition for two Saiges improvising together.
    The same set will govern altitude when the melody layer lands.             */
-const PENT = [
+const PENT_MINOR = [
   55.00,  65.41,  73.42,  82.41,  98.00,   // A1 C2 D2 E2 G2
  110.00, 130.81, 146.83, 164.81, 196.00,   // A2 C3 D3 E3 G3
  220.00, 261.63, 293.66, 329.63, 392.00,   // A3 C4 D4 E4 G4
  440.00, 523.25, 587.33, 659.25, 783.99,   // A4 C5 D5 E5 G5
  880.00,1046.50,1174.66,1318.51,1567.98    // A5 C6 D6 E6 G6
 ];
+/* C MAJOR PENTATONIC — C D E G A — for Soul Town. The same five slots and the
+   same "no avoid notes" guarantee, and a completely different mood, because the
+   only thing separating minor pentatonic from major pentatonic is which degree
+   you call home. Motown lives in the major. Not one line of the chart, lane or
+   scoring machinery changes — only the ladder underneath it. */
+const PENT_MAJOR = [
+  65.41,  73.42,  82.41,  98.00, 110.00,   // C2 D2 E2 G2 A2
+ 130.81, 146.83, 164.81, 196.00, 220.00,   // C3 D3 E3 G3 A3
+ 261.63, 293.66, 329.63, 392.00, 440.00,   // C4 D4 E4 G4 A4
+ 523.25, 587.33, 659.25, 783.99, 880.00,   // C5 D5 E5 G5 A5
+1046.50,1174.66,1318.51,1567.98,1760.00    // C6 D6 E6 G6 A6
+];
+let PENT = PENT_MINOR;
 const p = i => PENT[Math.max(0, Math.min(PENT.length-1, i))];
 
 // Root movement, one per bar. All roots are pentatonic degrees, so the harmony
 // never leaves the scale and no voice can collide with another.
-const ROOTS = [0, 1, 4, 2];                 // A · C · G · D  (degree index)
+let ROOTS = [0, 1, 4, 2];                   // A · C · G · D  (degree index)
+let NOTE_NAMES = ['A','C','D','E','G'];     // the fret labels, per track
+/* Jamerson in a table. Sixteenth slot → degree offset from the bar's root.
+   It walks up to the fifth and comes back down through the third, which is
+   the shape of half the basslines cut in that room, and because it is stated
+   as OFFSETS the same eight notes become a different line every bar as the
+   I–vi–ii–V moves underneath. */
+const SOUL_BASS = [[0,0],[3,0],[6,2],[8,3],[10,2],[12,1],[14,0],[15,-1]];
+
+/* ── THE TRACKS ─────────────────────────────────────────────────────────
+   Everything that makes one track not the other, in one table. Adding a third
+   is a new entry plus a bed and a chart set — no branching anywhere else in
+   the file, which is the property worth protecting.
+
+   `world` is the only value the RENDERER reads. Two worlds today: 'water' is
+   a causeway over a drowned city, 'street' is wet asphalt under sodium light. */
+const TRACKS = {
+  atlantica: {
+    name:'Atlantica', num:'Track 01', blurb:'Five lanes, five notes. Catch the orbs — <b>the big ones are the beat</b>. Jump the barriers or you slow down.',
+    gears:[120,126,134,146], scale:PENT_MINOR, roots:[0,1,4,2],
+    names:['A','C','D','E','G'], nodes:NODES_WATER, start:'shallows',
+    pal:PAL_WATER, world:'water', bed:'bedWater',
+    // Dotted 8th, fed back — a flooded hall.
+    echo:{ time:0.75, fb:0.24, damp:1500, send:0.15 },
+    ring:{ a:[0.98,0.34,0.58], b:[0.74,0.30,0.94] }
+  },
+  soultown: {
+    name:'Soul Town', num:'Track 02', blurb:'One in the morning, downtown. Ride the backbeat — <b>the tambourine is the grid</b>. Same five frets, major key.',
+    gears:[96,102,110,118], scale:PENT_MAJOR, roots:[0,4,1,3],
+    names:['C','D','E','G','A'], nodes:NODES_STREET, start:'motorrow',
+    pal:PAL_STREET, world:'street', bed:'bedStreet',
+    /* SLAP-BACK, not a hall. A single short repeat with almost no feedback is
+       the tape delay every vocal of the period went through, and it is the
+       other half of why this sounds like a record. */
+    echo:{ time:0.19, fb:0.10, damp:2600, send:0.11 },
+    ring:{ a:[1.00,0.72,0.26], b:[0.98,0.42,0.22] }
+  }
+};
+let TRACK = TRACKS.atlantica;
+
+/* Bind a track. Called once, before the route is built and before the audio
+   graph exists, so everything downstream simply reads the globals it always
+   read. The route is built HERE rather than at module scope, because which
+   node graph to start walking is now a choice. */
+function selectTrack(key){
+  TRACK = TRACKS[key] || TRACKS.atlantica;
+  GEARS = TRACK.gears; PENT = TRACK.scale; ROOTS = TRACK.roots;
+  NOTE_NAMES = TRACK.names; NODES = TRACK.nodes; PAL = TRACK.pal;
+  TRACK_NAME = TRACK.name;
+  BED = Clock[TRACK.bed];
+  RIDER.ringA = TRACK.ring.a; RIDER.ringB = TRACK.ring.b;
+  for(let i=0;i<STEMS.length;i++){
+    STEMS[i].name = TRACK.names[i];
+    if(stemEls[STEMS[i].key]) stemEls[STEMS[i].key].row.querySelector('.nm').textContent = TRACK.names[i];
+  }
+  EVENTS.length = 0; ROUTE.length = 0; routeEndBeat = 0;
+  pushNode(TRACK.start, 'S');
+}
+
 
 /* Registers are deliberately far apart. The old mix had bass and pad fighting
    for the same octave, which is why only the LEAD lane read as distinct. */
 const LEAD_MEL = [19,0,18,0, 17,0,0,15, 0,17,0,0, 18,0,20,0];   // A4–G5, sparse
 const ARP_SEQ  = [20,22,24,22, 21,23,20,23, 20,22,24,21, 23,20,22,24]; // A5+, constant 16ths
 
+// Which bed is playing. Bound by selectTrack(); voice() is the only reader.
+let BED = null;
 const Clock = {
   ctx:null, started:false,
-  bpm: GEARS[1], gear:1,
+  bpm: 126, gear:1,        // replaced from GEARS on start()
   beatAtChange:0, timeAtChange:0,      // tempo map: beats address the chart, not seconds
   step:0, nextStepTime:0, lookahead:0.12,
 
   start(){
     if(this.started) return;
+    this.bpm = GEARS[this.gear];              // the chosen track's tempo range
     this.ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
     this.master = this.ctx.createGain(); this.master.gain.value = volume * 0.8;
     const comp = this.ctx.createDynamicsCompressor();
@@ -1304,11 +1481,12 @@ const Clock = {
        top of them. It is still here, because the flooded hall is the world and
        sparse playing should not sound dead, but it is now an effect the drums
        sit in FRONT of rather than inside. */
-    this.fx = c.createGain(); this.fx.gain.value = 0.15;
+    const E = TRACK.echo;
+    this.fx = c.createGain(); this.fx.gain.value = E.send;
     this.dly = c.createDelay(2.0);
-    this.dly.delayTime.value = this.spb()*0.75;          // dotted 8th
-    const fb = c.createGain(); fb.gain.value = 0.24;
-    const damp = c.createBiquadFilter(); damp.type='lowpass'; damp.frequency.value = 1500;
+    this.dly.delayTime.value = this.spb()*E.time;
+    const fb = c.createGain(); fb.gain.value = E.fb;
+    const damp = c.createBiquadFilter(); damp.type='lowpass'; damp.frequency.value = E.damp;
     this.fx.connect(this.dly);
     this.dly.connect(damp); damp.connect(fb); fb.connect(this.dly);
     damp.connect(this.duck);                       // echoes pump with everything else
@@ -1354,7 +1532,7 @@ const Clock = {
     const b = this.songBeat();
     this.beatAtChange = b; this.timeAtChange = this.ctx.currentTime;
     this.gear = g; this.bpm = GEARS[g]; gearNow = g;
-    if(this.dly) this.dly.delayTime.setTargetAtTime(this.spb()*0.75, this.ctx.currentTime, 0.2);
+    if(this.dly) this.dly.delayTime.setTargetAtTime(this.spb()*TRACK.echo.time, this.ctx.currentTime, 0.2);
   },
 
   /* ── ALIEN VOCAL ────────────────────────────────────────────────────
@@ -1600,7 +1778,11 @@ const Clock = {
      now a driving 4/4 rather than ambience, because a rhythm you can lock to is
      what makes striking a note ON the grid feel good. The player plays the
      topline over a floor that is already moving.                             */
-  voice(step, t){
+  // The bed is per track. voice() stays the scheduler's single entry point;
+  // BED decides which world is playing.
+  voice(step, t){ BED.call(this, step, t); },
+
+  bedWater(step, t){
     const s16 = step % 16, bar = Math.floor(step/16);
     const root = ROOTS[bar % 4];
     const c = this.ctx, D = this.duck;
@@ -1720,6 +1902,159 @@ const Clock = {
       const g=c.createGain(); g.gain.value=0.06;
       src.connect(bp).connect(g).connect(D); src.start(t);
     }
+  },
+
+  /* ══ THE SOUL TOWN BED ══════════════════════════════════════════════
+     Not the Atlantica groove slowed down — a different kind of groove, and
+     the differences are the whole point of the track existing.
+
+     NO SIDECHAIN PUMP. Atlantica breathes because house breathes: every kick
+     slams the mix down and lets it swell back, and that pump IS the genre.
+     Motown was four people in a room with one set of microphones. Nothing
+     ducked anything. The duck is nearly flat here (0.90, not 0.30) and that
+     single number is most of why the two tracks feel different before a note
+     of melody is played.
+
+     THE BACKBEAT IS THE LOUDEST THING. In house the kick is the event and 2
+     and 4 answer it. Here it inverts: kick on 1 and 3 holding the floor, and
+     the snare on 2 and 4 as the hardest hit in the bar, doubled by handclaps
+     the way every record cut in that building was.
+
+     TAMBOURINE ON EVERY 8TH. The single most identifying sound of the era —
+     it does the job hi-hats do everywhere else, and it is why these records
+     sound like they are moving even at 96bpm. Accented on the offbeat.
+
+     THE BASS IS A MELODY. A house bassline is the root in the holes the kick
+     leaves. A Motown bassline is a countermelody with more notes in it than
+     the tune, walking the pentatonic under the singer. That is what SOUL_BASS
+     is: sixteenth-grid, moving, and different every bar because the root moves
+     underneath it.
+
+     I–vi–ii–V. C · A · D · G, all four inside C major pentatonic, so the
+     "you cannot play a wrong note" guarantee survives a real chord progression
+     rather than a static vamp.
+
+     AND THE ROOM. Vinyl crackle, a slap-back instead of a flooded hall, and
+     the whole thing sitting slightly dark. It should sound like it is coming
+     off a record rather than out of a machine. */
+  bedStreet(step, t){
+    const s16 = step % 16, bar = Math.floor(step/16);
+    const root = ROOTS[bar % 4];
+    const c = this.ctx, D = this.duck, K = D;
+
+    /* KICK — 1 and 3, with a pickup 16th ahead of the 3 that makes the bar
+       lean forward. Rounder than the house kick: a shorter pitch drop from a
+       lower start, and only a whisper of beater click. It holds the floor
+       rather than being the event. */
+    if(s16 === 0 || s16 === 8 || s16 === 14){
+      const soft = s16 === 14 ? 0.34 : 1;
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(118, t);
+      o.frequency.exponentialRampToValueAtTime(46, t + 0.055);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.95*soft, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+      o.connect(g).connect(this.kickDrive);
+      o.start(t); o.stop(t + 0.38);
+      this.noise(t, 0.006, 2000, 'highpass', 0.10*soft, this.kickDrive);
+      // Barely a duck. Named and kept so the contrast with bedWater is on the
+      // record: this is the same line of code doing a quarter of the work.
+      D.gain.setValueAtTime(0.90, t);
+      D.gain.exponentialRampToValueAtTime(1.0, t + 0.10);
+    }
+
+    /* SNARE + HANDCLAPS on 2 and 4 — the hardest hit in the bar. The clap is
+       three noise bursts a few ms apart, which is what a room full of people
+       clapping actually is and why one sample never sounds right. */
+    if(s16 === 4 || s16 === 12){
+      const sn = c.createOscillator(), sg = c.createGain();
+      sn.type = 'triangle';
+      sn.frequency.setValueAtTime(232, t);
+      sn.frequency.exponentialRampToValueAtTime(178, t + 0.05);
+      sg.gain.setValueAtTime(0.0001, t);
+      sg.gain.exponentialRampToValueAtTime(0.52, t + 0.003);
+      sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+      sn.connect(sg).connect(this.drive); sn.start(t); sn.stop(t + 0.20);
+      this.noise(t, 0.11, 2100, 'bandpass', 0.46, K);
+      for(let i=0;i<3;i++) this.noise(t + 0.004 + i*0.011, 0.05, 1500, 'bandpass', 0.30, K);
+      this.noise(t + 0.002, 0.16, 3600, 'highpass', 0.16, K);
+    }
+
+    /* TAMBOURINE — every 8th, and harder on the offbeat. Short, bright, and
+       slightly different every hit, because a tambourine is a handful of
+       jingles and never lands twice the same way. */
+    if(s16 % 2 === 0){
+      const off = (s16 % 4 === 2);
+      const g = (off ? 0.20 : 0.11) * (0.86 + Math.random()*0.28);
+      this.noise(t, off ? 0.075 : 0.045, 7600 + Math.random()*1800, 'highpass', g, K);
+      this.noise(t + 0.006, 0.03, 11000, 'highpass', g*0.5, K);
+    }
+
+    /* THE BASSLINE. Sixteenth grid, degree offsets from the bar's own root,
+       so the same figure becomes a new line every bar as the progression
+       moves under it. Triangle through a resonant lowpass with a fast attack:
+       a wound string on a hollow body, not a synth. */
+    for(const [ss, dd] of SOUL_BASS){
+      if(ss !== s16) continue;
+      let deg = root + dd;
+      while(deg > 8) deg -= 5;                 // an octave is five degrees here
+      const f = p(Math.max(0, deg));
+      const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
+      o.type = 'triangle'; o.frequency.value = f;
+      lp.type = 'lowpass'; lp.Q.value = 4;
+      lp.frequency.setValueAtTime(f*9, t);
+      lp.frequency.exponentialRampToValueAtTime(f*2.6, t + 0.10);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.42, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+      o.connect(lp).connect(g).connect(K);
+      o.start(t); o.stop(t + 0.28);
+    }
+
+    /* THE CHANK — a short chord on every offbeat 8th, the guitar-and-piano
+       upstroke that fills the space between the kick and the snare. Three
+       consecutive pentatonic degrees, so it is a real triad and cannot clash
+       with anything the player does above it. */
+    if(s16 % 4 === 2){
+      for(let i=0;i<3;i++){
+        const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
+        o.type = 'triangle'; o.frequency.value = p(root + 10 + i);
+        o.detune.value = (i-1)*4;                       // a room, not a chip
+        lp.type = 'lowpass'; lp.frequency.value = 2600;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.11, t + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+        o.connect(lp).connect(g).connect(K);
+        o.start(t); o.stop(t + 0.16);
+      }
+    }
+
+    /* HORNS on the turnaround. Last bar of the four, answering the phrase —
+       a section always announced the end of a verse, and it is the one place
+       the bed is allowed to be loud. */
+    if(bar % 4 === 3 && (s16 === 8 || s16 === 14)){
+      const hi = s16 === 14;
+      for(const d of (hi ? [12, 14] : [10, 12, 14])){
+        const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
+        o.type = 'sawtooth'; o.frequency.value = p(root + d);
+        bp.type = 'bandpass'; bp.Q.value = 1.6; bp.frequency.value = p(root + d)*2.2;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(hi ? 0.15 : 0.19, t + 0.020);
+        g.gain.setValueAtTime(hi ? 0.15 : 0.19, t + (hi ? 0.10 : 0.16));
+        g.gain.exponentialRampToValueAtTime(0.0001, t + (hi ? 0.20 : 0.34));
+        o.connect(bp).connect(g).connect(K);
+        const sd = c.createGain(); sd.gain.value = 0.5; g.connect(sd).connect(this.fx);
+        o.start(t); o.stop(t + 0.40);
+      }
+    }
+
+    /* VINYL. A record is not silent between the notes — it ticks. Sparse,
+       random, and quiet enough that you only notice it when it stops. */
+    if(Math.random() < 0.30)
+      this.noise(t + Math.random()*this.spb()*0.25, 0.004,
+                 2600 + Math.random()*5200, 'highpass', 0.010 + Math.random()*0.022,
+                 this.master);
   },
 
   /* THE MELODY VOICE — a sustained tone that glides to whatever pentatonic
@@ -2154,7 +2489,7 @@ const Game = {
    fretboard. You are not managing an ensemble; you are playing a part, and flow
    is what happens when there is only one thing to do.
    ══════════════════════════════════════════════════════════════════════════ */
-const RIDER = { ringA:[0.98,0.34,0.58], ringB:[0.74,0.30,0.94] };
+const RIDER = { ringA:[0.98,0.34,0.58], ringB:[0.74,0.30,0.94] };   // retinted per track
 
 /* REFERENCE FRAME. The player is beat-locked and always sits at PLAYER_Z,
    because the chart is addressed in beats and that must not change. "Going
@@ -2678,7 +3013,23 @@ const TOUCH = matchMedia('(hover:none) and (pointer:coarse)').matches;
 if(TOUCH) document.getElementById('startk').textContent = 'Tap to start';
 
 const gate = document.getElementById('gate');
+/* The picker has to run BEFORE Clock.start(): tempo, scale, echo and the whole
+   route graph are properties of the track, not settings applied over one. So
+   the gate chooses, and only then does anything exist. */
+let gPick = 'atlantica';
+const gTrackEl = document.getElementById('gtrack'), gBlurbEl = document.getElementById('gblurb');
+for(const el of gate.querySelectorAll('.pick')){
+  el.addEventListener('click', e=>{
+    e.stopPropagation();                       // choosing is not starting
+    gPick = el.dataset.track;
+    for(const o of gate.querySelectorAll('.pick')) o.classList.toggle('on', o === el);
+    const T = TRACKS[gPick];
+    gTrackEl.textContent = T.num + ' — ' + T.name;
+    gBlurbEl.innerHTML = T.blurb;
+  });
+}
 gate.addEventListener('click', ()=>{
+  selectTrack(gPick);
   Clock.start(); gate.classList.add('hide'); showTouchHint(); }, {once:true});
 
 /* ── resize ────────────────────────────────────────────────────────────── */
@@ -2714,7 +3065,12 @@ function frame(now){
   const waveT  = ((beat*Clock.spb()) % 8 + 8) % 8;
   // Swell is capped so the sea NEVER reaches the deck. Open sections get bigger
   // water for drama, but the track stays legible above it.
-  const swell  = sec.kind === 'open' ? 0.72 : 0.50;
+  /* Soul Town's "sea" is wet asphalt, so the swell all but stops: enough
+     movement for the sodium light to crawl on the surface, not enough to read
+     as water. Same shader, same wave field, one number. */
+  const swell  = TRACK.world === 'street'
+    ? (sec.kind === 'open' ? 0.15 : 0.10)
+    : (sec.kind === 'open' ? 0.72 : 0.50);
   const amp    = swell * (0.86 + 0.20*Math.sin(bar*Math.PI*2 - 1.2) + barPulse*0.16);
 
   // Autoride steers before events resolve, so a move it makes on this beat is
@@ -2855,7 +3211,7 @@ function frame(now){
        voice and pitch the next orb will strike. Silence until you play. */
     Game.octave = Game.octUp ? 5 : 0;
     const deg = Math.round(Math.max(0, Math.min(4, Game.laneVis)));
-    Game.noteName = ['A','C','D','E','G'][deg] + (Game.octave ? '↑' : '');
+    Game.noteName = NOTE_NAMES[deg] + (Game.octave ? '↑' : '');
   } else Game.noteName = '';
 
   const bob = Math.sin(beat*Math.PI*2)*0.09 + pulse*0.14;
@@ -3012,6 +3368,87 @@ function frame(now){
       for(const sx of [-1,1])
         pushInst(MESH_BOX, cxz + sx*(hwz+0.5), DECK_Y-3.4, z, 0.30, 3.3, 0.30,
                  DECK[0]*0.65, DECK[1]*0.65, DECK[2]*0.65, 0,0, 0);
+    }
+  }
+
+  /* ── SOUL TOWN: THE BLOCK ─────────────────────────────────────────
+     Tenements and streetlights down both sides. Two things make this work and
+     both are worth stating.
+
+     IT IS ANCHORED IN WORLD SPACE, not camera space. The deck loop above walks
+     z from +26 to -350 — camera-relative — which is right for something that
+     is the same at every point along the road. A building is NOT: it has a
+     position, and generating it from camera-relative z would rebuild it at a
+     different world point every frame, so the whole street would slide
+     backwards through itself. This loop walks WORLD distance in fixed 22-unit
+     lots and converts to camera z, so lot 41 is the same building on every
+     frame it is on screen.
+
+     ITS RANDOMNESS IS A HASH OF THE LOT NUMBER, never Math.random(). Same
+     reason: a building has to be the same height on the frame after the one
+     you first saw it on. Hashing the lot index gives a street that is varied,
+     endless, free to generate and completely stable.
+
+     And they are REAL BOXES rather than the billboard skyline Atlantica uses,
+     because a street has to have depth you move through — the near ones must
+     slide past faster than the far ones, and the windows have to BE somewhere
+     rather than being painted on the horizon. */
+  if(TRACK.world === 'street'){
+    const dNow = beat*UPB;
+    const LOT = 22;
+    const hash = (k, n) => { const x = Math.sin(k*127.1 + n*311.7)*43758.5453; return x - Math.floor(x); };
+    const k0 = Math.floor((dNow - 44)/LOT), k1 = Math.ceil((dNow + 336)/LOT);
+    for(let k = k0; k <= k1; k++){
+      const d  = k*LOT;
+      const zz = PLAYER_Z - (d - dNow);
+      if(zz > 30 || zz < -352) continue;
+      const bb = d/UPB;
+      if(bb < 0) continue;
+      const cxb = centerX(bb), hwb = deckHalfW(bb);
+      const far = Math.max(0, 1 - (-zz)/340);            // 1 near, 0 out at the fog
+      for(const sx of [-1,1]){
+        const side = sx < 0 ? 0 : 1;
+        // Set back from the kerb, and never so tall near the camera that it
+        // eats the sky the road has to be read against.
+        const bh = 16 + hash(k, side)*30;
+        const bw = 7  + hash(k, side+2)*7;
+        const off = hwb + 8.5 + hash(k, side+4)*3.5;
+        const warm = 0.06 + hash(k, side+6)*0.05;
+        pushInst(MESH_BOX, cxb + sx*(off + bw*0.5), DECK_Y - 2 + bh*0.5, zz,
+                 bw, bh, 8.5,
+                 0.055 + warm*0.55, 0.048 + warm*0.34, 0.070 + warm*0.30, 0,0, 0);
+        // WINDOWS. Three per face, lit or dark on the same hash, so a block
+        // reads as somebody being up at one in the morning rather than as a
+        // texture. Only on the face turned toward the road.
+        for(let w=0; w<3; w++){
+          if(hash(k, side*8 + w + 11) < 0.42) continue;
+          const wy = DECK_Y + 2.5 + w*(bh/3.4) + hash(k, w+21)*1.2;
+          if(wy > DECK_Y - 2 + bh - 1.5) continue;
+          pushInst(MESH_BOX, cxb + sx*(off - 0.05), wy, zz + (hash(k,w+31)-0.5)*5.0,
+                   0.12, 0.75, 1.05, 1.0, 0.80, 0.42, 0,0, 0.55 + 0.35*far);
+        }
+      }
+      /* STREETLIGHTS. Every other lot, both sides, and the reason the track
+         reads at all: the pool of light on the road is what gives the asphalt
+         a surface, and the lamp heads marching away are what give the street
+         its perspective. */
+      if(k % 2 === 0){
+        for(const sx of [-1,1]){
+          const off = hwb + 1.9;
+          pushInst(MESH_BOX, cxb + sx*off, DECK_Y + 3.4, zz, 0.16, 7.0, 0.16,
+                   0.10,0.09,0.11, 0,0, 0);
+          pushInst(MESH_BOX, cxb + sx*(off - 0.85), DECK_Y + 6.9, zz,
+                   0.95, 0.12, 0.16, 0.12,0.11,0.12, 0,0, 0);
+          pushInst(MESH_SPH, cxb + sx*(off - 1.5), DECK_Y + 6.6, zz,
+                   0.40, 0.26, 0.40, 1.0,0.66,0.28, 0,0, 1.0);
+          /* The pool it throws. Dark base colour carrying most of its light in
+             GLOW rather than in albedo — at full brightness these read as
+             glowing slabs lying on the road instead of light falling on it,
+             and the road stops being a surface. */
+          pushInst(MESH_BOX, cxb + sx*(off - 2.4), DECK_Y + 0.02, zz,
+                   1.7, 0.01, 2.6, 0.52,0.29,0.11, 0,0, 0.30 + 0.16*far);
+        }
+      }
     }
   }
 
@@ -3326,6 +3763,13 @@ function frame(now){
      never one event behind the thing it is being used to diagnose. */
   if(TDBG) tdbgPaint();
 }
+/* Bind the default track before the first frame. The route used to be built at
+   module scope and now is not — it is a choice — but the frame loop starts
+   immediately and reads routeAt() whether or not anyone has pressed start, so
+   something has to be selected. Down here rather than up there because
+   selectTrack() touches Clock, STEMS, RIDER and the HUD, none of which exist
+   until the script has finished running. Choosing at the gate simply rebuilds. */
+selectTrack('atlantica');
 resize();
 requestAnimationFrame(frame);
 </script>
