@@ -1331,19 +1331,31 @@ function laneSpanAt(b){
      heading h is radians, h = 0 points down -Z (the way you start)
      forward(h) = ( sin h, -cos h)      right(h) = ( cos h,  sin h)
    so positive h turns you toward +X, i.e. h grows to the RIGHT.            */
-const TURN_B = 1.5;                              // beats spent rounding a corner
-const TURN_L = TURN_B*UPB;                       // ...which is this far...
-const TURN_R = TURN_L/(Math.PI/2);               // ...at this radius.
+/* THE ROADS ARE STRAIGHT. The first version rounded each corner with a
+   quarter-circle arc, and driving it made the mistake obvious: a rounded
+   corner does not read as "I turned into a side street", it reads as the main
+   road itself bending — the whole world leaning over for a beat and a half
+   while you sit still. A city is not curved. Streets are straight and they
+   meet at right angles, and the turn is an EVENT at the intersection, not a
+   manoeuvre spread across it.
+
+   So the path is a polyline now: straight segments, heading changing by a
+   quarter turn instantly at a block boundary. What was TURN_B beats of arc is
+   zero beats of arc. The corner is a corner.
+
+   The camera is what smooths it — see CAM_TURN below — because the geometry
+   snapping is correct and the VIEW snapping is not. */
+const TURN_B = 0;                                // no arc: streets meet square
+const CROSS_W = 52;                              // how far a side street is drawn
 const fwdX = h => Math.sin(h), fwdZ = h => -Math.cos(h);
 const rgtX = h => Math.cos(h), rgtZ = h => Math.sin(h);
 
 /* Where a block's arc leaves you. Computed once when the block is pushed,
    because it seeds both the straight run after it and the next block. */
+/* Where a block actually begins: the same point the last one ended, facing a
+   quarter turn off it if this block turns. Cached when the block is pushed. */
 function arcEndOf(e){
-  if(!e.turn) return { x:e.px, z:e.pz, h:e.h };
-  const sg = Math.sign(e.turn), h = e.h + sg*(Math.PI/2);
-  const cx = e.px + rgtX(e.h)*TURN_R*sg, cz = e.pz + rgtZ(e.h)*TURN_R*sg;
-  return { x: cx - rgtX(h)*TURN_R*sg, z: cz - rgtZ(h)*TURN_R*sg, h };
+  return { x:e.px, z:e.pz, h: e.h + Math.sign(e.turn||0)*(Math.PI/2) };
 }
 /* The centreline at beat b, in WORLD space. Writes into `out` rather than
    returning an object: the draw loops call this a few thousand times a frame
@@ -1353,14 +1365,8 @@ function arcEndOf(e){
 function pathInto(b, out){
   const e = ROUTE[routeIndexAt(b)];
   const u = Math.max(0, (b - e.startBeat)*UPB);
-  if(e.turn && u < TURN_L){
-    const sg = Math.sign(e.turn), h = e.h + sg*(u/TURN_L)*(Math.PI/2);
-    const cx = e.px + rgtX(e.h)*TURN_R*sg, cz = e.pz + rgtZ(e.h)*TURN_R*sg;
-    out.x = cx - rgtX(h)*TURN_R*sg; out.z = cz - rgtZ(h)*TURN_R*sg; out.h = h;
-  } else {
-    const a = e.arc, d = e.turn ? u - TURN_L : u;
-    out.x = a.x + fwdX(a.h)*d; out.z = a.z + fwdZ(a.h)*d; out.h = a.h;
-  }
+  const a = e.arc;
+  out.x = a.x + fwdX(a.h)*u; out.z = a.z + fwdZ(a.h)*u; out.h = a.h;
   return out;
 }
 const PATH_A = {x:0,z:0,h:0}, PATH_B = {x:0,z:0,h:0}, PATH_C = {x:0,z:0,h:0};
@@ -1373,18 +1379,36 @@ const PATH_A = {x:0,z:0,h:0}, PATH_B = {x:0,z:0,h:0}, PATH_C = {x:0,z:0,h:0};
    It returns a shared record. Every caller uses it immediately and none of
    them keep it: this runs a few thousand times a frame and allocating there
    is a garbage collector running inside a rhythm game. */
-const FRAME = { o:PATH_A, ch:1, sh:0 };
+/* CAM_TURN is how fast the view swings round a corner. The ROAD turns
+   instantly — that is what makes it a city and not a racetrack — but the
+   CAMERA cannot, or the screen cuts. So the frame is built from a damped
+   heading that chases the road's: the rider is still exactly on the path
+   (the frame's origin is the path point, so it maps to the same place no
+   matter which way the camera faces), and for about a third of a second
+   afterwards the world is still swinging into line behind them.
+
+   Snapping the geometry and easing the view is the whole trick. Ease the
+   geometry instead and the road bends, which is the thing that felt wrong. */
+const CAM_TURN = 9;
+const FRAME = { o:PATH_A, ch:1, sh:0, camH:0, init:false };
 const VPT = { x:0, z:0, yaw:0 };
-function setFrame(b){
+function setFrame(b, dt){
   pathInto(b, FRAME.o);
-  FRAME.ch = Math.cos(FRAME.o.h); FRAME.sh = Math.sin(FRAME.o.h);
+  if(!FRAME.init){ FRAME.camH = FRAME.o.h; FRAME.init = true; }
+  // Shortest way round, so a turn through the -π/+π seam does not spin the
+  // long way about.
+  let d = FRAME.o.h - FRAME.camH;
+  d -= Math.PI*2*Math.floor((d + Math.PI)/(Math.PI*2));
+  FRAME.camH += d * Math.min(1, (dt||0.016)*CAM_TURN);
+  FRAME.ch = Math.cos(FRAME.camH); FRAME.sh = Math.sin(FRAME.camH);
 }
 function place(b, lat){
   worldInto(b, lat, PATH_B);
   viewInto(PATH_B.x, PATH_B.z, FRAME.o, FRAME.ch, FRAME.sh, VPT);
-  VPT.yaw = PATH_B.h - FRAME.o.h;
+  VPT.yaw = PATH_B.h - FRAME.camH;
   return VPT;
 }
+
 
 /* World position `lat` units to the right of the centreline at beat b. The
    existing lateral weave rides along too, so Atlantica's forks still work
@@ -1430,6 +1454,13 @@ function validatePath(){
   // 2. unit speed everywhere, arcs included: UPB units of world per beat.
   const b0 = ROUTE[0].startBeat, b1 = ROUTE[ROUTE.length-1].endBeat;
   for(let b = b0; b < b1 - 0.05; b += 0.25){
+    // Skip samples that straddle a corner: the path turns instantly there, so
+    // a finite difference across the boundary measures the chord of a right
+    // angle rather than the distance travelled. That is the corner being
+    // sharp, which is the point, not a fault.
+    let straddles = false;
+    for(const r of ROUTE) if(r.turn && b < r.startBeat && b + 0.05 > r.startBeat) straddles = true;
+    if(straddles) continue;
     pathInto(b, A); pathInto(b + 0.05, B);
     const v = Math.hypot(B.x-A.x, B.z-A.z)/0.05;
     if(Math.abs(v - UPB) > 0.6) bad.push(`speed ${v.toFixed(2)} at beat ${b.toFixed(2)} (want ${UPB})`);
@@ -3360,7 +3391,7 @@ function frame(now){
   /* THE FRAME FOR THIS FRAME. Everything drawn below is expressed relative to
      where the player is on the path and which way they are pointing, so this
      has to be set before the first place() call and cannot move afterwards. */
-  setFrame(beat);
+  setFrame(beat, dt);
   const cx0 = centerX(beat);
   /* In the melody layer the lane is expressed as ALTITUDE, so the lateral
      offset has to collapse — exactly as the chart objects already do with
@@ -3439,9 +3470,7 @@ function frame(now){
      one, and the road you were actually driving slid off to the far side of
      the frame. Measuring the turn rate and pulling the target in restores it:
      the camera follows the corner instead of arriving before it. */
-  pathInto(beat + 1, PATH_C);
-  const curve = Math.min(1, Math.abs(PATH_C.h - FRAME.o.h) / (Math.PI/2/TURN_B));
-  const AHEAD = place(beat + 2.6 - 1.6*curve, 0);
+  const AHEAD = place(beat + 2.6, 0);
   const aheadX = AHEAD.x;
   // Pulled back for the racer build: you need to read rivals and spheres, not
   // just the next lane. Costs some detail up close; worth it.
@@ -3618,6 +3647,50 @@ function frame(now){
      rather than being painted on the horizon. */
   if(TRACK.world === 'street'){
     const dNow = beat*UPB;
+
+    /* ── THE CROSSING ────────────────────────────────────────────────
+       A side street you cannot see is not a choice, it is a trap. The gap in
+       the buildings said "something happens here"; this says what. At every
+       block boundary in range, road surface is laid ACROSS the one you are on
+       — same deck, same markings, turned a quarter turn — so the intersection
+       reads as a real crossroads from a long way off and you can see which way
+       the side street runs before you have to decide anything.
+
+       Drawn by sweeping the LATERAL offset at a fixed beat, which is exactly
+       what "perpendicular to the road here" means once place() exists. The
+       middle is skipped: the main deck already occupies it. */
+    for(const r of ROUTE){
+      const rb = r.startBeat;
+      if(rb <= 0) continue;
+      const ahead = (rb - beat)*UPB;
+      if(ahead > 330 || ahead < -30) continue;
+      const xhw = deckHalfW(rb);
+      const nearX = Math.max(0, 1 - ahead/330);
+      for(let lat = -CROSS_W; lat <= CROSS_W; lat += 6){
+        if(Math.abs(lat) < xhw + 1) continue;              // the main road is here
+        const P = place(rb, lat);
+        const yw = P.yaw + Math.PI/2;                      // square to the CROSS street
+        pushInst(MESH_BOX, P.x, DECK_Y-0.2, P.z, xhw+0.9, 0.22, 2.9,
+                 DECK[0], DECK[1], DECK[2], 0,0, 0, yw);
+        // centre line down the crossing, so its direction reads at distance
+        pushInst(MESH_BOX, P.x, DECK_Y+0.03, P.z, 0.055, 0.03, 1.5,
+                 DECK[0]*2.4, DECK[1]*2.2, DECK[2]*2.0, 0,0, 0.12, yw);
+      }
+      // A lamp on each far corner of the crossing — the thing that actually
+      // catches your eye from four blocks back.
+      for(const sx of [-1,1]) for(const sy of [-1,1]){
+        const P = place(rb + sy*0.42, sx*(xhw + 2.2));
+        pushInst(MESH_SPH, P.x, DECK_Y + 6.6, P.z, 0.40, 0.26, 0.40,
+                 1.0,0.66,0.28, 0,0, 1.0);
+        pushInst(MESH_BOX, P.x, DECK_Y + 3.4, P.z, 0.16, 7.0, 0.16,
+                 0.10,0.09,0.11, 0,0, 0, P.yaw);
+      }
+      // and the sodium wash lying in the junction itself
+      const C0 = place(rb, 0);
+      pushInst(MESH_BOX, C0.x, DECK_Y + 0.015, C0.z, xhw+0.6, 0.01, xhw+0.6,
+               0.52,0.29,0.11, 0,0, 0.22 + 0.14*nearX, C0.yaw);
+    }
+
     const LOT = 22;
     const hash = (k, n) => { const x = Math.sin(k*127.1 + n*311.7)*43758.5453; return x - Math.floor(x); };
     const k0 = Math.floor((dNow - 44)/LOT), k1 = Math.ceil((dNow + 336)/LOT);
