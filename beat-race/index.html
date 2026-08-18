@@ -819,8 +819,15 @@ function hullGeo(){
    everything on screen is ~1600 boxes, so 4200 is headroom rather than a
    budget — and pushInst() drops silently past its cap, which is the one
    failure mode worth over-provisioning against because it looks like the city
-   half-existing rather than like an error. */
-const MESH_BOX  = makeMesh(...boxGeo(),   4200);   // Soul Town's blocks and lamps live here too
+   half-existing rather than like an error.
+
+   Raised again once the town reached the fog limit and grew traffic: measured
+   peak is 3631 in the densest corner of The Strip, where tall theatres, blade
+   signs, marquees and a full 450-unit radius all land in one frame. 4200 was
+   a 14% margin on that, which is not a margin — one more archetype or one
+   wider street and the far half of the city would start silently vanishing.
+   The buffer costs 13 floats an instance; 6000 of them is 312KB. */
+const MESH_BOX  = makeMesh(...boxGeo(),   6000);   // Soul Town's blocks and lamps live here too
 const MESH_SPH  = makeMesh(...sphereGeo(), 900);
 const MESH_HULL = makeMesh(...hullGeo(),    12);
 const MESH_TOR  = makeMesh(...torusGeo(),   16);
@@ -1267,7 +1274,7 @@ function placeHurdles(ent, from, to){
   const notes = [];
   for(const e of EVENTS){
     if(e.beat < from || e.beat >= to) continue;
-    if(e.t === 'flow' || e.t === 'haz' || e.t === 'jump') notes.push(e.beat);
+    if(e.t === 'flow' || e.t === 'haz' || e.t === 'jump' || e.t === 'traffic') notes.push(e.beat);
   }
   notes.sort((a,b)=>a-b);
   if(notes.length < 2) return;
@@ -1280,6 +1287,89 @@ function placeHurdles(ent, from, to){
     if(notes[i] - at < HURDLE_CLEAR_OF) continue;
     EVENTS.push({ beat: at, lane:-1, t:'hurdle', acc:1, done:false });
   }
+}
+
+/* ══ TRAFFIC ══════════════════════════════════════════════════════════
+   A car that is actually DRIVING, in a lane, with its lights on — and the one
+   obstacle in the game you meet from behind rather than head on.
+
+   It runs at TRAFFIC_SPEED of your pace, so you close on it at the difference
+   and it grows in the windscreen the way a slower car does. That is the whole
+   reason it is worth having over a static barrier: a barrier arrives at you,
+   and this you CATCH UP WITH, which is a completely different read and a
+   completely different piece of timing.
+
+   Two ways past. It sits in one lane, so on a boulevard you can go round it —
+   and in an alley there is no round, so an alley car is a jump and the jump is
+   the whole event. Which means the same object gets harder as the street gets
+   narrower without a line of code saying so, exactly as the hurdles do.
+
+   Placed, never authored, on the same principle as the hurdles: the chart says
+   where the notes are, and traffic goes where they are NOT, so it can never
+   fight the line and it thins out by itself as density climbs. One per block at
+   most — a street with a car every two bars is a car park.                    */
+const TRAFFIC_GAP   = 1.5;    // beats of rest a car needs to sit in
+/* CLEAR OF ANY NOTE BY HALF A BEAT. Not 0.6, and the difference is not taste:
+   a car sits in the middle of its rest and then SNAPS TO THE 8TH like
+   everything else in this piece, and the midpoint of a 1.5-beat gap whose ends
+   are on 8ths lands 0.5 from one side and 1.0 from the other whichever way it
+   rounds. At 0.6 that fails, so every gap of exactly 1.5 was rejected — which
+   is the largest rest a boulevard or a side street has, so cars only ever
+   appeared in alleys. Measured: 2 cars in 33 blocks, all of them in alleys.
+
+   Half a beat is ample anyway. The decision is made beats earlier, because the
+   car is visible from the far end of the street; this clearance is only about
+   the jump not colliding with a note, and the vault lasts 0.9 beats. */
+const TRAFFIC_CLEAR = 0.5;
+const TRAFFIC_SPEED = 0.45;   // fraction of your speed — the rest is your closing rate
+/* Where a car IS at player-beat b, in chart beats. At b = its own beat it is
+   exactly on you (which is what makes the collision test a plain beat test);
+   before that it is ahead by the fraction of the gap it has not yet driven. */
+const trafficAt = (e, b) => e.beat + TRAFFIC_SPEED*(b - e.beat);
+
+/* TRAFFIC GOES FIRST, BEFORE THE HURDLES, and that ordering is the feature
+   working rather than an implementation detail. Both are placed into the rests,
+   but a hurdle needs 1.25 beats and a car needs 1.5 — so if the hurdles are
+   laid first they take every gap in the block and halve what is left, and no
+   gap anywhere is ever big enough for a car again. Measured: zero cars in two
+   hundred beats. The bigger obstacle picks first, then the smaller one fills
+   what remains, which is also the order you would place them by hand.
+
+   And it takes the LARGEST rest in the block rather than the first one that
+   qualifies, because a car is the one obstacle you see coming for several
+   beats and it should sit in the most open water there is. */
+function placeTraffic(ent, from, to){
+  if(!TRACK.grid || ent.kind === 'melody') return;
+  // Not in every block that could take one — a car every two bars is a car park.
+  if(hash2(from*1.7, 5.3) < 0.42) return;
+  const notes = [];
+  for(const e of EVENTS){
+    if(e.beat < from || e.beat >= to) continue;
+    if(e.t !== 'junction') notes.push(e);       // never on top of anything else
+  }
+  notes.sort((a,b) => a.beat - b.beat);
+  let best = -1, bestGap = TRAFFIC_GAP;
+  for(let i=1;i<notes.length;i++){
+    const g = notes[i].beat - notes[i-1].beat;
+    if(g >= bestGap){ bestGap = g; best = i; }
+  }
+  if(best < 0) return;
+  const at = Math.round((notes[best-1].beat + notes[best].beat)/2 * 2)/2;   // onto the 8th
+  if(at - notes[best-1].beat < TRAFFIC_CLEAR || notes[best].beat - at < TRAFFIC_CLEAR) return;
+  /* WHICH LANE. Away from whichever lane the phrase is using around the gap,
+     so on a road wide enough to dodge, dodging is a real option and the car is
+     never simply parked on the note you are travelling to. On a one-lane street
+     the span collapses and the choice makes itself. */
+  const sp = laneSpanAt(at);
+  // Hurdles and gates carry lane -1 as a "spans everything" sentinel, so they
+  // cannot vote on which lane is free — fall back to the middle for those.
+  const lz = e2 => (e2.lane >= 0 ? e2.lane : 2);
+  const busy = lz(notes[best-1]), next = lz(notes[best]);
+  let lane = sp.lo;
+  for(let l = sp.lo; l <= sp.hi; l++)
+    if(Math.abs(l-busy) + Math.abs(l-next) > Math.abs(lane-busy) + Math.abs(lane-next)) lane = l;
+  EVENTS.push({ beat: at, lane, t:'traffic', acc:1, done:false,
+                car: hash2(at*3.7, lane*11.3) });        // which paintwork
 }
 
 function pushNode(key, choice){
@@ -1430,7 +1520,9 @@ function emitBlock(seg, notBefore){
       EVENTS.push({ beat: bt, lane, t: e.t || 'flow',
                     acc, fill: !!e.fill, done:false });
     }
-  placeHurdles(ent, Math.max(from, notBefore), Math.min(from + SEG_B, ent.endBeat));
+  const bFrom = Math.max(from, notBefore), bTo = Math.min(from + SEG_B, ent.endBeat);
+  placeTraffic(ent, bFrom, bTo);        // the bigger obstacle picks its rest first
+  placeHurdles(ent, bFrom, bTo);        // and the smaller one fills what is left
 }
 /* THE CHART FROM A CROSSING FORWARD. Called by takeTurn(), and deliberately
    the same shape as the geometry regrow it sits next to: throw away everything
@@ -3200,10 +3292,15 @@ const Game = {
     if(!this.auto || this.dead || this.down() || Clock.paused) return;
 
     // Gates and hurdles span every lane, so they are jumped rather than dodged.
+    // Traffic sits in ONE lane, so it is jumped only when it is in ours and
+    // there is no time left to go round it — which is also the decision a
+    // player makes, and the reason autoride is a diagnostic as well as a demo.
     for(const e of EVENTS){
-      if(e.done || (e.t !== 'jump' && e.t !== 'hurdle')) continue;
+      if(e.done) continue;
       const d = e.beat - beat;
-      if(d > 0 && d < 0.30 && !this.jumping(beat)){ this.jump(); break; }
+      if(d <= 0 || d >= 0.30 || this.jumping(beat)) continue;
+      if(e.t === 'jump' || e.t === 'hurdle'){ this.jump(); break; }
+      if(e.t === 'traffic' && e.lane === this.hitLane()){ this.jump(); break; }
     }
 
     // Aim at the next note. Hazards in the way are handled by the same rule —
@@ -3215,7 +3312,7 @@ const Game = {
     }
     if(want < 0){
       for(const e of EVENTS){
-        if(e.done || e.t !== 'haz') continue;
+        if(e.done || (e.t !== 'haz' && e.t !== 'traffic')) continue;
         const d = e.beat - beat;
         if(d > 0 && d < 0.9 && e.lane === this.hitLane())
           want = this.lane < 2 ? this.lane + 1 : this.lane - 1;
@@ -4760,6 +4857,18 @@ function frame(now){
       e.done = true;
     } else if(e.t === 'flow'){
       if(e.lane === Game.hitLane()){ Game.catchFlow(beat, e); e.got = true; e.done = true; }
+    } else if(e.t === 'traffic'){
+      /* Same lane and not in the air — you drove into the back of it. Costs a
+         gear like a hurdle does and not the streak: you mistimed a movement,
+         not a note, and taking the multiplier for that would punish the music
+         for something that was not musical. Above the road it passes under you
+         with everything else on it. */
+      if(Game.sideMix > 0.5){ e.done = true; continue; }
+      if(e.lane === Game.hitLane()){
+        if(!Game.jumping(beat)) Game.clip();
+        else { e.cleared = true; Clock.vault(Game.jumpAt + 0.9, false); judge('OVER IT', '#4fd4e4'); }
+      }
+      e.done = true;
     } else if(e.t === 'jump' || e.t === 'hurdle'){
       /* NOTHING ON THE ROAD CAN HIT YOU WHILE YOU ARE FLYING OVER IT.
 
@@ -4973,12 +5082,43 @@ function frame(now){
      middle of the junction, which is the one piece of ground the lattice
      guarantees is empty — the block corners are left open precisely so a
      junction is see-through. It goes back out as the view comes level. */
-  const BACK = place(beat - (29 - 17*swing)/UPB, laneX(camLane)*0.45);
-  const backX = BACK.x, backZ = BACK.z;
-  // A little higher through the corner as well, so the eye clears the kerbside
-  // furniture it is now much closer to.
-  const chaseEye=[backX, camY+8.4+bob+2.6*swing, backZ];
-  const chaseCtr=[aheadX + laneX(camLane)*0.30, camY-0.2, aheadZ];
+  /* ══ THE EYE SITS BEHIND THE RIDER, NOT BACK ALONG THE ROAD ═══════
+     It used to be `place(beat - 29/UPB)` — the path point twenty-nine units
+     behind — on the reasoning that the camera should take the corner too. It
+     does take the corner. It takes it for far too long.
+
+     The two timescales do not match, and that is the whole bug. The camera
+     HEADING catches up to the road in about a third of a second (CAM_TURN). The
+     path point twenty-nine units back stays round the corner for 29/20 beats —
+     nearly a second at this tempo. So for the two thirds of a second in between
+     the heading is straight while the eye is still out on the street you left:
+     measured one frame after a turn had visually finished, the eye was 27 units
+     off to the side. The road crosses the frame diagonally, the rider slides
+     out of the middle, and the notes arrive from off screen. That is not a
+     camera taking a corner, it is a camera that has lost you — which is
+     exactly what it looked like.
+
+     A corner is not a camera move anyway. It is THE WORLD ROTATING AROUND THE
+     RIDER, and the way to draw that is to hold the rider still and let
+     everything else turn. So the eye is simply behind them: the whole scene is
+     already drawn rotated into the camera's heading, so "behind" is a constant
+     in view space and the framing of a corner is identical to the framing of a
+     straight. Rider centred, road running away, city sweeping past.
+
+     On a straight this is the same point it always was, to within the lateral
+     drift of a branch — so Atlantica sees no change. */
+  const trail = 29 - 17*swing;
+  /* The LOOK-AT still comes off the path, because on a straight that is what
+     makes the camera follow a branch. Only through the swing does it slide onto
+     the camera's own axis, where the target has to be for the rider to stay
+     centred while the world turns underneath. */
+  const ctrX  = (aheadX + laneX(camLane)*0.30);
+  const lookX = ctrX + (px*0.30 - ctrX)*swing;
+  const lookZ = aheadZ + ((PLAYER_Z - 46) - aheadZ)*swing;
+  // A little higher through the corner, so the eye clears the kerbside
+  // furniture that the shortened trail has brought it much closer to.
+  const chaseEye=[px*0.45, camY+8.4+bob+2.6*swing, PLAYER_Z + trail];
+  const chaseCtr=[lookX, camY-0.2, lookZ];
 
   /* SIDE VIEW. Looking along -X, so world -Z becomes screen-right: the track
      runs off to the right and notes arrive from there, while altitude reads
@@ -5018,11 +5158,23 @@ function frame(now){
   const m = Game.sideMix, lerp3 = (a,b)=>[a[0]+(b[0]-a[0])*m, a[1]+(b[1]-a[1])*m, a[2]+(b[2]-a[2])*m];
   const eye = lerp3(chaseEye, sideEye);
   const ctr = lerp3(chaseCtr, sideCtr);
+  /* AND IT BANKS. With the rider held still and the world turning around them,
+     the one thing left saying WHICH WAY you went is the world itself — and a
+     rotation with no tilt in it reads as the scene sliding rather than as the
+     camera going round something. Eleven degrees of roll into the turn, off the
+     signed swing so it leans the correct way by construction and unwinds by
+     itself as the view comes level. It is the same lean the Saige already has
+     into a branch, moved up to the camera.
+
+     Never in the melody layer: there the horizon IS the staff, and tilting the
+     five pitch lines would break the one reference the layer has. */
+  const roll = Math.max(-0.20, Math.min(0.20, swingD*0.14)) * (1 - Game.sideMix);
+  const upV = [Math.sin(roll), Math.cos(roll), 0];
   // Narrower FOV in side view: magnifies the staff without pulling the camera so
   // close that you lose the beats of lookahead a rhythm game needs.
   const fovDeg = 60 + (44 - 60)*m;
   const asp=W/H;
-  const VP=M4.mul(M4.persp(fovDeg*Math.PI/180, asp, NEAR, FAR), M4.lookAt(eye, ctr, [0,1,0]));
+  const VP=M4.mul(M4.persp(fovDeg*Math.PI/180, asp, NEAR, FAR), M4.lookAt(eye, ctr, upV));
 
   /* FIT THE WORLD TO THE FRUSTUM.
      Horizontal half-angle of the actual camera this frame. Everything that has
@@ -5271,6 +5423,42 @@ function frame(now){
          halo around it, and it wrecked the silhouette. Size and glow already
          separate the three tiers cleanly at distance — measured on screen — so
          the ring was cost without signal. */
+    } else if(e.t === 'traffic'){
+      /* Drawn where it IS, which is not where its beat is — the car has been
+         driving since long before you got here, so its position is its own
+         beat run forward at its own speed. At the moment of the collision test
+         the two coincide exactly, which is what keeps a plain beat comparison
+         honest (fairness rule 1: the hitbox is the art).
+
+         Tail lights, because the whole object only works if you can see it
+         from behind at night, and brake lights that come up as you close so the
+         last beat before the jump is unmistakable. */
+      const cb = trafficAt(e, beat);
+      const cdz = (cb - beat)*UPB;
+      if(cdz < -8 || cdz > 340) continue;
+      const CP = place(cb, laneX(e.lane)*(1-mm));
+      const cx2 = CP.x, cz2 = CP.z, cyaw = CP.yaw;
+      const cy = DECK_Y + ((altY(e.lane) - 0.7) - DECK_Y)*mm;
+      const close = Math.max(0, 1 - Math.abs(cdz)/70);       // how near you are
+      const col = CAR_COL[(e.car*CAR_COL.length)|0];
+      pushInst(MESH_BOX, cx2, cy+0.62, cz2, 1.15, 0.52, 2.45,
+               col[0], col[1], col[2], 0,0, 0, cyaw);
+      pushInst(MESH_BOX, cx2, cy+1.14, cz2, 1.13, 0.06, 2.50,
+               0.62,0.64,0.66, 0,0, 0.18, cyaw);           // chrome waistline
+      pushInst(MESH_BOX, cx2, cy+1.58, cz2+0.25, 0.98, 0.42, 1.15,
+               col[0]*0.8, col[1]*0.8, col[2]*0.8, 0,0, 0, cyaw);
+      for(const sx of [-1, 1]){
+        /* The lamps are placed BACK ALONG THE ROAD by a beat offset, not by
+           adding to view z. Those are the same thing on a straight and not at
+           all the same after a corner, where view z is no longer the direction
+           the car is pointing — the lights would slide off the side of it.
+           Everything else in this file that means "further along the road"
+           says so with a beat, and so does this. */
+        const CQ = place(cb - 2.3/UPB, (laneX(e.lane) + sx*0.72)*(1-mm));
+        // Brake lights: lit always, hard once you are on it.
+        pushInst(MESH_BOX, CQ.x, cy+0.78, CQ.z, 0.30, 0.13, 0.10,
+                 1.0, 0.16, 0.10, 0,0, 0.75 + 0.85*close, CQ.yaw);
+      }
     } else if(e.t === 'hurdle'){
       /* A low bar across the whole road. Drawn exactly as wide as it hits
          (fairness rule 1), so it takes the local road width — narrower on a
