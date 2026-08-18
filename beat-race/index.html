@@ -9,7 +9,10 @@
   html,body{margin:0;height:100%;background:#060d14;overflow:hidden;touch-action:none;
     font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);
     user-select:none;-webkit-user-select:none}
-  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  /* touch-action does NOT inherit, so the copy on <body> was never governing
+     the element the finger actually lands on. This is the one that counts. */
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block;
+    touch-action:none;-webkit-touch-callout:none}
 
   /* ── the mix IS the score readout ───────────────────────────────────── */
   #mix{position:fixed;left:14px;top:50%;transform:translateY(-50%);z-index:10;
@@ -117,6 +120,13 @@
     #gate .keys{display:none}
   }
 
+  /* The ?touchdebug readout. Off unless the URL asks for it. */
+  #tdbg{position:fixed;left:8px;top:8px;z-index:30;display:none;white-space:pre;
+    padding:8px 10px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(6,13,20,.88);color:var(--ink);pointer-events:none;
+    font:9px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+  #tdbg.on{display:block}
+
   /* AUTORIDE badge. Deliberately obvious — a demo mode that is not clearly
      signposted reads as the controls having stopped working. */
   #auto{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:11;
@@ -161,6 +171,7 @@
 </div>
 <div id="auto"><i></i>Autoride &nbsp;·&nbsp; arrow key to take over</div>
 <div id="judge"></div>
+<div id="tdbg"></div>
 <div id="sect"></div>
 <div id="pausebtn" title="Pause (Esc)">❙❙</div>
 
@@ -2171,7 +2182,7 @@ document.addEventListener('visibilitychange', ()=>{
 pauseEl.addEventListener('click', ()=> setPause(false));
 document.getElementById('pausebtn').addEventListener('click', e=>{
   e.stopPropagation(); setPause(!Clock.paused); });
-/* ── TOUCH — four gestures, and that is the whole phone build ────────────
+/* ── INPUT, POINTING DEVICES ─────────────────────────────────────────────
      chase view   swipe ← →   change lane        swipe ↑   jump
      side view    swipe ↑ ↓   up/down the staff  (← → do the same thing)
      either       double tap  switch view
@@ -2179,52 +2190,66 @@ document.getElementById('pausebtn').addEventListener('click', e=>{
    SIDE VIEW IS VERTICAL, so its gesture is vertical. The five slots are
    stacked one above the other on screen; asking for the top one by swiping
    RIGHT was a mismatch you had to translate every single time, and translating
-   is exactly what you cannot spare a beat for. Up is up now. Left/right stay
-   bound to the same two moves rather than being freed, because there is no
-   second verb in this layer for them to mean instead — and keeping them means
-   a sloppy diagonal still plays the note you meant.
+   is exactly what you cannot spare a beat for. Up is up. Left/right stay bound
+   to the same two moves rather than being freed, because there is no second
+   verb in this layer for them to mean instead — and keeping them means a
+   sloppy diagonal still plays the note you meant.
 
-   Chase view is unchanged: sideways moves you sideways, up jumps, and down is
-   inert because there is nothing below the deck. The view switch is a double
-   tap — a mode switch happens twice a song, and a tap cannot collide with a
-   swipe the way two meanings on one axis did. A single tap stays unbound so a
-   mistimed swipe never toggles the camera.
+   Chase view: sideways moves you sideways, up jumps, down is inert because
+   there is nothing below the deck. The view switch is a double tap — a mode
+   switch happens twice a song, and a tap cannot collide with a swipe the way
+   two meanings on one axis did. A single tap stays unbound so a mistimed swipe
+   never toggles the camera.
 
-   ── WHY THIS WORKED ON A TABLET AND NOT ON A PHONE ────────────────────────
-   Three separate phone-only failures, all of them fixed here:
+   ── ONE GESTURE MACHINE, TWO EVENT FAMILIES ──────────────────────────────
+   Everything below funnels into gDown/gMove/gEnd/gCancel. Touch events feed
+   it, and Pointer events feed it too — but only if a touchstart has never
+   arrived, so the two can never both fire for one finger. That redundancy is
+   deliberate: this bug has already survived one confident fix, and "the device
+   is not sending the events I assumed" is the one failure a smarter gesture
+   rule cannot reach. Whichever family the phone actually delivers, the game
+   gets its swipe.
 
-   1. THE AXIS WAS DECIDED TOO EARLY, AND ON EVEN TERMS. The old code took the
-      first touchmove past 26px and read the axis straight off it. On a tablet
-      a swipe is a whole finger crossing a wide screen, and that first sample
+   ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+   1. THE AXIS WAS DECIDED TOO EARLY, AND ON EVEN TERMS. The first build took
+      the first move past 26px and read the axis straight off it. On a tablet a
+      swipe is a whole finger crossing a wide screen, and that first sample
       already points where you are going. On a phone it is a THUMB PIVOTING
-      FROM A CORNER: the opening millimetres of a sideways thumb flick are
-      mostly vertical, because the thumb has to arc before it can travel — so
-      the game read "jump" off a stroke that had not gone sideways YET, locked
-      it in, and threw the rest away.
+      FROM A CORNER: the opening millimetres of a sideways flick are mostly
+      vertical, because the thumb has to arc before it can travel — so the game
+      read "jump" off a stroke that had not gone sideways YET.
 
       The fix is not to wait longer (latency is a beat, and a beat is the whole
       game) but to make the two axes cost different amounts. Each layer has a
       main verb, and that verb's axis is the CHEAP one: sideways in chase view,
-      vertical in side view. The other axis must travel 1.5× as far to fire.
-      A thumb arc never reaches the expensive gate before the intended axis
-      clears the cheap one, and a real jump — which is a near-vertical flick,
-      not an arc — clears the expensive gate easily.
+      vertical in side view. The other axis must travel 1.5× as far. A thumb
+      arc never reaches the expensive gate before the intended axis clears the
+      cheap one, and a real jump is a near-vertical flick, not an arc.
 
-   2. iOS KEPT THE GESTURE. The listener was passive, so Safari was free to
-      hand a horizontal drag to its own back/forward navigation — which is
-      precisely the drag this game runs on, and which `touch-action:none` does
-      not cover. touchmove is now non-passive and calls preventDefault(), so
-      the page takes the gesture first. Touches that start on a control are
-      exempt, or the volume slider would stop dragging.
+   2. iOS KEPT THE GESTURE. The listeners were passive, so Safari was free to
+      hand a horizontal drag to its own back/forward navigation — precisely the
+      drag this game runs on. `touch-action:none` on <body> does not reliably
+      cover a touch that lands on the canvas, because touch-action does not
+      inherit; it is set on the canvas itself now. Belt and braces, the start
+      and move of a non-UI stroke are non-passive and call preventDefault(), so
+      the page takes the gesture before iOS can. Touches that begin on a
+      control are exempt, or the volume slider would stop dragging.
 
    3. THE THRESHOLD WAS AN ABSOLUTE. 26px is 3% of an iPad's short side and 7%
       of an iPhone's in landscape — the same flick had to be more than twice as
       committed on the smaller screen. It scales with the viewport now.
 
-   And a catch-all: if the finger lifts (or iOS cancels the sequence) without
-   any sample having cleared a gate, the whole stroke is judged on release. A
-   flick that arrives as one coalesced move still registers. */
-let tsx=0, tsy=0, tsw=false, tst=0, tid=null, tui=false;
+   4. A STROKE THAT ENDED ANY OTHER WAY WAS THROWN AWAY. If the finger lifts,
+      or iOS cancels the sequence mid-drag because it decided the gesture was
+      the system's, the travel so far is judged on the spot rather than lost.
+      The end of a stroke never requires the terminating event to still carry
+      our touch — the last position we saw is enough.
+
+   If it is STILL dead on a device, load the page with ?touchdebug and the raw
+   event stream is on screen: which families arrive, how far they got, and any
+   exception thrown inside a handler. */
+let gx=0, gy=0, glx=0, gly=0, gfired=false, gt0=0, gid=null, gui=false;
+let sawTouch = false;                   // touch events exist here → ignore pointer
 let lastTap=0, lastTapX=0, lastTapY=0;
 // A touch that lands on a control (pause, its overlay, the start gate) belongs
 // to that control, not to the game.
@@ -2238,8 +2263,6 @@ const swipeMin = () =>
    whichever axis clears its OWN gate by the wider margin owns the stroke. */
 const swipeGate = () => { const m = swipeMin();
   return Game.inMelody ? {x:m*1.5, y:m} : {x:m, y:m*1.5}; };
-// The touch that owns the current gesture, picked out of a changed-touch list.
-const owned = list => { for(const t of list) if(t.identifier === tid) return t; return null; };
 
 /* Perform the move a stroke of (dx,dy) means, in whichever layer we are in. */
 function swipe(dx, dy){
@@ -2258,69 +2281,165 @@ function swipe(dx, dy){
       if(Game.lane <= 0 && Game.octUp){ Game.octUp = false; judge('OCTAVE ▼','#4fd4e4'); }
       else Game.tryLane(-1);
     }
+    tdbg((horiz?'swipe ':'swipe ') + (up ? 'UP' : 'DOWN') + ' → staff');
     return;
   }
-  if(horiz)        Game.tryLane(dx > 0 ? 1 : -1);
-  else if(dy < 0)  Game.jump();
+  if(horiz){ Game.tryLane(dx > 0 ? 1 : -1); tdbg('swipe ' + (dx>0?'RIGHT':'LEFT') + ' → lane'); }
+  else if(dy < 0){ Game.jump(); tdbg('swipe UP → jump'); }
+  else tdbg('swipe DOWN → nothing here');
   // down in chase view: nothing below the deck, nothing to do
 }
 
-addEventListener('touchstart', e=>{
-  /* One finger owns the stroke — a second landing mid-swipe must not move the
-     anchor out from under it. The staleness escape is not paranoia: if a
-     touchend is ever lost, a permanent `tid` would dead-lock every gesture
-     after it, which is the exact failure this whole block exists to kill. */
-  if(tid !== null && performance.now() - tst < 2000) return;
-  const t = e.changedTouches[0];
-  tid = t.identifier; tsx = t.clientX; tsy = t.clientY;
-  tsw = false; tst = performance.now(); tui = onUI(e.target);
+/* ── the gesture machine ───────────────────────────────────────────────── */
+/* Returns true if this stroke belongs to the game (so the caller knows whether
+   to swallow the browser's own gesture). One stroke at a time: a second finger
+   landing mid-swipe must not move the anchor out from under it. The staleness
+   escape is not paranoia — if an end event is ever lost, a stuck `gid` would
+   dead-lock every gesture after it, which is the exact class of failure this
+   whole block exists to kill. */
+function gDown(id, x, y, target){
+  if(gid !== null && performance.now() - gt0 < 2000) return false;
+  gid = id; gx = glx = x; gy = gly = y; gfired = false; gt0 = performance.now();
+  gui = onUI(target);
   hideTouchHint();
-}, {passive:true});
-
-addEventListener('touchmove', e=>{
-  if(tui) return;                                   // let the slider be a slider
-  // Take the gesture away from iOS before it decides this is a page swipe.
-  if(e.cancelable) e.preventDefault();
-  if(tsw || Clock.paused) return;
-  const t = owned(e.changedTouches); if(!t) return;
-  const dx = t.clientX - tsx, dy = t.clientY - tsy, g = swipeGate();
-  if(Math.abs(dx) < g.x && Math.abs(dy) < g.y) return;   // neither gate cleared yet
-  tsw = true; swipe(dx, dy);
-}, {passive:false});
-
-addEventListener('touchend', e=>{
-  const t = owned(e.changedTouches); if(!t) return;
-  tid = null;
-  if(tui || Clock.paused) return;
-  const dx = t.clientX - tsx, dy = t.clientY - tsy, now = performance.now();
-  const g = swipeGate();
-  if(!tsw && (Math.abs(dx) >= g.x || Math.abs(dy) >= g.y)){
-    // Travelled far enough, but no sample ever cleared a gate on its own —
-    // judge the whole stroke.
-    tsw = true; swipe(dx, dy);
+  tdbg('down');
+  return !gui;
+}
+function gMove(x, y){
+  glx = x; gly = y;
+  if(gui || gfired || Clock.paused) return;
+  const dx = x - gx, dy = y - gy, g = swipeGate();
+  if(Math.abs(dx) < g.x && Math.abs(dy) < g.y) return;   // neither gate cleared
+  gfired = true; swipe(dx, dy);
+}
+/* The end of a stroke, however it ended. `tap` is false for a cancel — a
+   cancelled stroke can still have been a swipe, but it was never a tap. */
+function gEnd(x, y, tap){
+  gid = null;
+  if(gui || Clock.paused) return;
+  const dx = x - gx, dy = y - gy, g = swipeGate(), now = performance.now();
+  if(!gfired && (Math.abs(dx) >= g.x || Math.abs(dy) >= g.y)){
+    // It travelled, but no single sample ever cleared a gate — judge the
+    // whole stroke. This is the catch-all for a flick delivered as one
+    // coalesced move, and for a drag iOS cut short.
+    gfired = true; swipe(dx, dy);
   }
-  if(tsw) return;
-  if(now - tst > 300) return;                       // a press, not a tap
-  if(now - lastTap < 320 &&
-     Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 60){
+  if(gfired || !tap) return;
+  if(now - gt0 > 300) return;                       // a press, not a tap
+  if(now - lastTap < 320 && Math.hypot(x - lastTapX, y - lastTapY) < 60){
     lastTap = 0;
     if(Game.auto){ Game.auto = false; judge('AUTORIDE OFF', '#7f97a8'); }
     Game.toggleLayer();                             // double tap = switch view
+    tdbg('double tap → view');
   } else {
-    lastTap = now; lastTapX = t.clientX; lastTapY = t.clientY;
+    lastTap = now; lastTapX = x; lastTapY = y;
   }
+}
+
+/* ── touch events ──────────────────────────────────────────────────────── */
+/* Index loop, not for…of. TouchList is a legacy array-like and its iterability
+   is not something to bet a phone build on. */
+function owned(list){
+  if(!list) return null;
+  for(let i=0;i<list.length;i++) if(list[i].identifier === gid) return list[i];
+  return null;
+}
+addEventListener('touchstart', e=>{
+  sawTouch = true; tcount('start');
+  const t = e.changedTouches[0]; if(!t) return;
+  // Swallowing the START is what stops iOS opening its own swipe gesture.
+  if(gDown(t.identifier, t.clientX, t.clientY, e.target) && e.cancelable) e.preventDefault();
+}, {passive:false});
+addEventListener('touchmove', e=>{
+  tcount('move');
+  if(!gui && e.cancelable) e.preventDefault();      // let the slider be a slider
+  const t = owned(e.changedTouches); if(!t) return;
+  gMove(t.clientX, t.clientY);
+}, {passive:false});
+addEventListener('touchend', e=>{
+  tcount('end');
+  if(gid === null) return;
+  const t = owned(e.changedTouches);
+  // If the end event no longer carries our touch, the last place we saw it is
+  // just as good — better than dropping the stroke on the floor.
+  gEnd(t ? t.clientX : glx, t ? t.clientY : gly, true);
+}, {passive:true});
+addEventListener('touchcancel', e=>{
+  tcount('cancel');
+  if(gid === null) return;
+  const t = owned(e.changedTouches);
+  gEnd(t ? t.clientX : glx, t ? t.clientY : gly, false);
 }, {passive:true});
 
-/* iOS cancels a sequence it decides belongs to the system. A swipe that got
-   far enough before that still counts — losing the input is worse than acting
-   on a stroke the user may have abandoned. */
-addEventListener('touchcancel', e=>{
-  const t = owned(e.changedTouches); if(!t) return;
-  tid = null;
-  if(tui || tsw || Clock.paused) return;
-  const dx = t.clientX - tsx, dy = t.clientY - tsy, g = swipeGate();
-  if(Math.abs(dx) >= g.x || Math.abs(dy) >= g.y){ tsw = true; swipe(dx, dy); }
-}, {passive:true});
+/* ── pointer events, for a touch device that gives us no touch events ────
+   Gated on sawTouch, so a phone that does send touch events never runs both
+   families for one finger. A MOUSE is excluded deliberately: this path exists
+   to rescue a touchscreen, and letting the mouse drive it would hand desktop
+   players a double-click that switches the view mid-song — a new verb nobody
+   asked for, on the input that already has SPACE for it. */
+if(window.PointerEvent){
+  const pen = e => !sawTouch && e.pointerType !== 'mouse';
+  addEventListener('pointerdown', e=>{
+    if(!pen(e)) return; tcount('start');
+    gDown(e.pointerId, e.clientX, e.clientY, e.target);
+  });
+  addEventListener('pointermove', e=>{
+    if(!pen(e) || gid !== e.pointerId) return; tcount('move');
+    gMove(e.clientX, e.clientY);
+  });
+  addEventListener('pointerup', e=>{
+    if(!pen(e) || gid !== e.pointerId) return; tcount('end');
+    gEnd(e.clientX, e.clientY, true);
+  });
+  addEventListener('pointercancel', e=>{
+    if(!pen(e) || gid !== e.pointerId) return; tcount('cancel');
+    gEnd(e.clientX, e.clientY, false);
+  });
+}
+/* ── ?touchdebug ─────────────────────────────────────────────────────────
+   Load the page with ?touchdebug on the end of the URL and the raw input
+   stream is printed on screen. Debugging a phone through a person is a slow
+   loop — two days of it here — and every round of it so far has been spent
+   guessing at which of my assumptions the device was breaking. This makes one
+   screenshot answer that: whether the events arrive at all, which family they
+   arrive in, how far the stroke got, whether the clock was running, and the
+   text of any exception thrown inside a handler.
+
+   BUILD is the giveaway for the other half of the problem: a phone happily
+   showing a cached copy of the file, in which case none of this is running
+   and the stamp will say so. */
+const BUILD = '2026-08-18 · input 3';
+const TDBG  = /touchdebug/i.test(location.search + location.hash);
+const tdbgEl = document.getElementById('tdbg');
+const tdbgN = {start:0, move:0, end:0, cancel:0};
+let tdbgAct = '—', tdbgErr = '—';
+function tcount(k){ if(TDBG) tdbgN[k]++; }
+function tdbg(msg){ if(TDBG) tdbgAct = msg; }
+function tdbgPaint(){
+  const g = swipeGate();
+  tdbgEl.textContent =
+    'BUILD  ' + BUILD +
+    '\nevents down ' + tdbgN.start + ' · move ' + tdbgN.move +
+    ' · up ' + tdbgN.end + ' · cancel ' + tdbgN.cancel +
+    '\nfamily ' + (sawTouch ? 'touch' : (window.PointerEvent ? 'pointer' : 'none')) +
+    ' · stroke ' + (gid === null ? 'closed' : 'open') + (gui ? ' (on a control)' : '') +
+    '\ndelta  ' + Math.round(glx-gx) + ',' + Math.round(gly-gy) +
+    '  gate ' + Math.round(g.x) + ',' + Math.round(g.y) +
+    ' · fired ' + (gfired ? 'yes' : 'no') +
+    '\nclock  started ' + !!Clock.started + ' · paused ' + !!Clock.paused +
+    ' · view ' + (Game.inMelody ? 'side' : 'chase') + ' · lane ' + Game.lane +
+    '\naction ' + tdbgAct +
+    '\nerror  ' + tdbgErr;
+}
+if(TDBG){
+  tdbgEl.classList.add('on');   // painted every frame, from the HUD update
+  // An exception thrown inside a listener kills that listener's run silently.
+  // On a phone there is no console to notice it in, so it goes on the screen.
+  addEventListener('error', ev=>{
+    tdbgErr = (ev.message || 'error') + ' @' + (ev.lineno || '?');
+  });
+  tdbgPaint();                  // one paint up front, before the loop starts
+}
 
 /* The hint arms itself when the run starts and takes itself down after five
    seconds, or on the first touch. `arm` is what the coarse-pointer media query
@@ -2994,6 +3113,9 @@ function frame(now){
   for(let i=0;i<4;i++)
     beatDots[i].style.background = (Clock.started && i===bi)
       ? `rgba(223,234,242,${(0.35+pulse*0.65).toFixed(2)})` : 'rgba(127,151,168,.22)';
+  /* Painted here rather than from the input handlers, so a screenshot of it is
+     never one event behind the thing it is being used to diagnose. */
+  if(TDBG) tdbgPaint();
 }
 resize();
 requestAnimationFrame(frame);
