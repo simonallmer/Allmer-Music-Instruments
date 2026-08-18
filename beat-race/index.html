@@ -78,6 +78,10 @@
   /* THE TRACK PICKER. Two tracks now, so the gate has to ask — and it has to
      ask before the audio graph exists, because tempo, scale and echo are all
      properties of the track rather than settings on top of one. */
+  #gate .back{position:absolute;top:16px;left:16px;font-size:9px;letter-spacing:.20em;
+    text-transform:uppercase;color:var(--dim);text-decoration:none;
+    border:1px solid var(--line);border-radius:6px;padding:6px 12px}
+  #gate .back:hover{color:var(--ink)}
   #gate .picks{display:flex;gap:8px;margin:2px 0 4px}
   #gate .pick{border:1px solid var(--line);border-radius:6px;padding:7px 16px;
     font-size:10px;letter-spacing:.20em;text-transform:uppercase;color:var(--dim);
@@ -230,12 +234,14 @@
     </div>
     <div class="k" id="padbtn">On-screen arrows: On</div>
     <div class="k" id="autobtn">Autoride</div>
+    <div class="k" id="menubtn">Back to menu</div>
     <div class="k">Resume</div>
     <div class="hint">Esc or P &nbsp;·&nbsp; M to mute &nbsp;·&nbsp; R autoride</div>
   </div>
 </div>
 
 <div id="gate">
+  <a class="back" id="gback" href="../index.html">&#8592; All instruments</a>
   <h2>Beat Race</h2>
   <div class="picks">
     <div class="pick on" data-track="atlantica">Atlantica</div>
@@ -2994,6 +3000,21 @@ function hideTouchHint(){
 /* Autoride from the pause panel. On a phone there is no R key, and autoride is
    the one control with nowhere else to live once the gesture set is capped at
    four. Pausing is the natural place to reach for it. */
+/* BACK TO MENU. A full reload rather than an in-place teardown, and that is a
+   choice rather than laziness: a track owns the AudioContext, the tempo map,
+   the scheduler interval, the route graph, the event list and the whole audio
+   node graph, and unwinding all of it correctly on demand is a second code
+   path that would only ever run here — the kind that rots silently and strands
+   you in a half-built world. Reloading cannot get it wrong, and it lands
+   exactly where the player asked to be: the gate, with the track picker.
+   location.reload() rather than a bare path so ?touchdebug survives it. */
+document.getElementById('menubtn').addEventListener('click', e=>{
+  e.stopPropagation();
+  location.reload();
+});
+// Leaving for the hub must not also count as "start the game".
+document.getElementById('gback').addEventListener('click', e=> e.stopPropagation());
+
 const autoBtnEl = document.getElementById('autobtn');
 autoBtnEl.addEventListener('click', e=>{
   e.stopPropagation();
@@ -3414,7 +3435,20 @@ function frame(now){
         const bw = 7  + hash(k, side+2)*7;
         const off = hwb + 8.5 + hash(k, side+4)*3.5;
         const warm = 0.06 + hash(k, side+6)*0.05;
-        pushInst(MESH_BOX, cxb + sx*(off + bw*0.5), DECK_Y - 2 + bh*0.5, zz,
+        /* THE MELODY VIEW LOOKS THROUGH THIS ROW. The side camera sits at
+           cx0 + 46 — outside the right-hand kerb — so the +X row of buildings
+           stands directly between it and the track, and Soul Town's side view
+           was a letterbox of road glimpsed between tenements.
+
+           They SINK rather than disappear. The instanced pass is opaque, so
+           there is no alpha to fade and popping a whole row out on a threshold
+           would be a visible cut in the middle of a camera move. Dropping them
+           by their own height plus clearance takes them under the road plane,
+           where the depth buffer hides them completely, and does it on the same
+           smooth sideMix the camera turn already rides — the city sinks away as
+           you lift off it. The far row stays: from up there it is the backdrop. */
+        const sink = sx > 0 ? Game.sideMix*(bh + 12) : 0;
+        pushInst(MESH_BOX, cxb + sx*(off + bw*0.5), DECK_Y - 2 + bh*0.5 - sink, zz,
                  bw, bh, 8.5,
                  0.055 + warm*0.55, 0.048 + warm*0.34, 0.070 + warm*0.30, 0,0, 0);
         // WINDOWS. Three per face, lit or dark on the same hash, so a block
@@ -3424,7 +3458,7 @@ function frame(now){
           if(hash(k, side*8 + w + 11) < 0.42) continue;
           const wy = DECK_Y + 2.5 + w*(bh/3.4) + hash(k, w+21)*1.2;
           if(wy > DECK_Y - 2 + bh - 1.5) continue;
-          pushInst(MESH_BOX, cxb + sx*(off - 0.05), wy, zz + (hash(k,w+31)-0.5)*5.0,
+          pushInst(MESH_BOX, cxb + sx*(off - 0.05), wy - sink, zz + (hash(k,w+31)-0.5)*5.0,
                    0.12, 0.75, 1.05, 1.0, 0.80, 0.42, 0,0, 0.55 + 0.35*far);
         }
       }
@@ -3435,11 +3469,14 @@ function frame(now){
       if(k % 2 === 0){
         for(const sx of [-1,1]){
           const off = hwb + 1.9;
-          pushInst(MESH_BOX, cxb + sx*off, DECK_Y + 3.4, zz, 0.16, 7.0, 0.16,
+          // Same reason as the buildings: the near row is between the melody
+          // camera and the staff. The lamps go down with their street.
+          const lsink = sx > 0 ? Game.sideMix*19 : 0;
+          pushInst(MESH_BOX, cxb + sx*off, DECK_Y + 3.4 - lsink, zz, 0.16, 7.0, 0.16,
                    0.10,0.09,0.11, 0,0, 0);
-          pushInst(MESH_BOX, cxb + sx*(off - 0.85), DECK_Y + 6.9, zz,
+          pushInst(MESH_BOX, cxb + sx*(off - 0.85), DECK_Y + 6.9 - lsink, zz,
                    0.95, 0.12, 0.16, 0.12,0.11,0.12, 0,0, 0);
-          pushInst(MESH_SPH, cxb + sx*(off - 1.5), DECK_Y + 6.6, zz,
+          pushInst(MESH_SPH, cxb + sx*(off - 1.5), DECK_Y + 6.6 - lsink, zz,
                    0.40, 0.26, 0.40, 1.0,0.66,0.28, 0,0, 1.0);
           /* The pool it throws. Dark base colour carrying most of its light in
              GLOW rather than in albedo — at full brightness these read as
