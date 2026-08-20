@@ -2056,60 +2056,114 @@ const p = i => PENT[Math.max(0, Math.min(PENT.length-1, i))];
 // never leaves the scale and no voice can collide with another.
 let ROOTS = [0, 1, 4, 2];                   // A · C · G · D  (degree index)
 let NOTE_NAMES = ['A','C','D','E','G'];     // the fret labels, per track
-/* ══ THE GROOVE, IN FOUR TABLES ═══════════════════════════════════════
-   Everything the drums and the bass do lives here, as four bars rather than
-   one, and that is the entire fix for "there is no groove".
+/* ══ THE GROOVE, WRITTEN OUT ══════════════════════════════════════════
+   Two records are the source, and they were picked because both of them are
+   PENTATONIC — which is the one property this whole game already rests on.
 
-   The old bed was ONE bar of everything, repeated. One kick pattern, one
-   eight-note bass figure, one chank, and only the root moved underneath —
-   which is a loop, not a groove. A groove is a four-bar sentence: it states
-   something, answers it, sits back, and then drives into the turnaround. You
-   feel the four because the bars are not the same, and you cannot feel it at
-   all when they are.
+   SUPERSTITION is one chord that never moves and a CLAVINET playing a two-bar
+   cell in swung 16ths. There is no progression to follow: the riff is the
+   harmony. The groove is not in the notes, it is in the holes between them,
+   and it is in the fact that every second 16th arrives fractionally late.
 
-   `s` is the 16th slot inside the bar. Bass values are OFFSETS in scale
-   degrees from whatever the bar's root is, so the same written line becomes a
-   new line as the I–vi–ii–V moves under it — and because everything is
-   pentatonic, still nothing can collide.                                    */
+   SIR DUKE is the opposite record. It moves, it is bright, it is major, and
+   its hook is a UNISON LINE — bass, horns and guitar playing exactly the same
+   scalar run, in octaves, while the rest of the band gets out of the way.
+   Nobody harmonises it. That is precisely why you can sing it back.
+
+   Soul Town takes the engine from one and the hook from the other, and takes
+   from neither the thing it cannot have: a chromatic passing note. Both those
+   records lean on notes outside the five. Here a wrong note has to stay
+   impossible, so every line below is built from the five and nothing else —
+   which turns out to cost the riffs almost nothing and the run nothing at all.
+
+   `s` is the 16th slot in the bar. Every pitch is an OFFSET in scale degrees
+   from whatever the bar's root is, so a written line becomes a NEW line as the
+   harmony moves under it, and still cannot collide with anything above it. */
 
 /* THE KICK. 1 and 3 are the floor and appear in every bar; everything else is
-   the syncopation, and it is different every bar. Bar 2 pushes an 8th early
-   into bar 3, bar 4 drives four-to-the-floor into the turnaround. */
+   syncopation, and it is different every bar. Bar 2 pushes an 8th early into
+   bar 3, bar 4 drives into the turnaround. */
 const SOUL_KICK = [
-  [0, 6, 8],              // 1 · 2& · 3
-  [0, 8, 14],             // 1 · 3 · 4&      — leans into the next bar
-  [0, 3, 8, 11],          // 1 · 1a · 3 · 3a — the busy one
-  [0, 8, 12, 14]          // 1 · 3 · 4 · 4&  — hands over to the top
+  [0, 6, 10],             // 1 · 2& · 3&
+  [0, 3, 8, 14],          // 1 · 1a · 3 · 4&      — leans into the next bar
+  [0, 6, 8, 11],          // 1 · 2& · 3 · 3a      — the busy one
+  [0, 8, 10, 12, 14]      // 1 · 3 · 3& · 4 · 4&  — hands over to the top
 ];
 
 /* GHOST NOTES on the snare, and this is most of what "feel" actually is. A
    backbeat on its own is a metronome hitting 2 and 4; the quiet 16ths between
    them are what make a drummer sound like a person. They sit at a tenth of
-   the backbeat's level — you do not hear them, you hear their absence. */
+   the backbeat's level — you do not hear them, you hear their absence. They
+   are also the loudest thing carrying the shuffle, because they land on the
+   e and the a and those are the two slots that arrive late. */
 const SOUL_GHOST = [
-  [7, 10, 15],
-  [2, 6, 11],
-  [3, 7, 10, 15],
-  [2, 10, 14]
+  [3, 7, 11, 15],
+  [2, 6, 7, 14],
+  [1, 3, 10, 11, 15],
+  [3, 7, 9, 15]
 ];
 
-/* THE BASSLINE. Jamerson's job: not the root under the chord but a
-   countermelody with more notes in it than the tune. Four distinct bars —
-   states the tonic, darkens on the vi, opens up on the ii, then climbs the
-   whole scale on the V and hands back to the top. */
+/* THE BASSLINE. Jamerson's job, and Stevie's after him: not the root under the
+   chord but a countermelody with more notes in it than the tune. Four distinct
+   bars — states the tonic, answers busier on the vi, sits back and leaves air
+   on the ii, then climbs the whole scale on the V and hands back to the top. */
 const SOUL_BASS4 = [
-  [[0,0],[3,0],[6,3],[8,0],[11,2],[12,1],[14,0],[15,3]],      // I  — the statement
-  [[0,0],[2,0],[5,2],[8,3],[10,4],[12,3],[14,2],[15,0]],      // vi — the answer, busier
-  [[0,0],[4,3],[7,2],[8,0],[12,-1],[14,0]],                   // ii — sits back
-  [[0,0],[3,2],[6,3],[8,4],[10,5],[12,4],[14,3],[15,2]]       // V  — climbs out
+  [[0,0],[3,0],[6,2],[8,4],[10,3],[11,2],[14,1],[15,0]],      // I  — the statement
+  [[0,0],[2,0],[3,2],[6,3],[8,4],[10,3],[12,2],[14,1],[15,0]],// vi — the answer, busier
+  [[0,0],[5,2],[8,4],[11,3],[14,2]],                          // ii — sits back
+  [[0,0],[2,1],[4,2],[6,3],[8,4],[10,5],[12,4],[14,2],[15,0]] // V  — climbs out
 ];
 
-/* THE HORN RIFF. Once every EIGHT bars, and that rarity is the point — the
-   old bed put a horn stab on every fourth bar and another one every fourth
-   note the player caught, which is a section that never stops playing and the
-   fastest way to make brass boring. A riff you hear twice a minute is a hook.
-   The same line four times a minute is wallpaper. */
-const HORN_RIFF = [[8,14,0.11],[10,12,0.088],[11,14,0.080],[12,16,0.135],[15,14,0.095]];
+/* ══ THE CLAVINET CELL ════════════════════════════════════════════════
+   The engine, and the single biggest change to this track. A clav line is not
+   a chord part — it is a drum that happens to have pitches, and it is written
+   as TWO bars rather than four on purpose: the bass moves through all four
+   chords underneath while the clav says the same thing twice. Static riff over
+   moving harmony is the whole trick, and it is why one cell can hold up an
+   entire record without wearing out.
+
+   `[slot, degree, level]`. Degrees are offsets from the bar's root, two
+   octaves up. The levels matter as much as the pitches: a clav played flat is
+   an organ, and the accents here all land off the beat.                     */
+const CLAV2 = [
+  // bar A — answers the kick, gets out of the backbeat's way, lands on the a
+  [[0,0,1.00],[3,2,0.55],[6,3,0.85],[7,2,0.45],[10,0,0.90],[11,2,0.50],[14,3,0.80],[15,4,0.50]],
+  // bar B — the same shape turned over: it climbs where A sat still
+  [[0,0,1.00],[2,2,0.50],[3,3,0.70],[6,4,0.90],[8,3,0.50],[10,2,0.85],[13,4,0.60],[14,5,0.75],[15,3,0.45]]
+];
+
+/* ══ THE UNISON RUN ═══════════════════════════════════════════════════
+   The hook. Two bars of 16ths played by the BASS, the CLAVINET and the HORN
+   SECTION at once, in three octaves, with nothing else harmonising it and the
+   chank, the organ and the horn stabs all standing down while it happens.
+
+   It arrives on the last two bars of every SIXTEEN — about once every thirty
+   seconds — and that rarity is the point. The old bed answered the turnaround
+   with a horn figure every four bars, which is a section that never stops
+   playing. A line you hear twice a minute is a hook; the same line four times
+   a minute is wallpaper, however well it is written.
+
+   Thirty-two slots, one per 16th across the two bars. A number is a scale
+   degree above the tonic; `_` is a rest, and the note before it holds through.
+   Read it down the columns and you can see the shape: run up, sit on the top,
+   walk back down, land.                                                     */
+const _ = null;
+const UNISON = [
+   0,  1,  2,  3,    4,  _,  5,  _,    4,  3,  4,  5,    6,  _,  5,  4,
+   3,  4,  5,  _,    4,  3,  2,  _,    1,  2,  3,  _,    0,  _,  _,  _
+];
+
+/* THE SECTION, once per eight bars, on the bar the bass climbs. Three short
+   notes voiced as a pentatonic stack, and short is the whole instruction:
+   brass is an EVENT. The moment you ask it to be a texture it turns into
+   wallpaper, which is what the organ is for. */
+const HORN_STAB = [[6,2,0.095],[8,1,0.080],[11,3,0.115]];
+
+/* WHICH OFFBEAT THE GUITAR SITS OUT, per bar of the four. A chank on all four
+   offbeats of every bar is a metronome with a chord on it; one hole a bar, in
+   a different place each bar, is a player. Side streets only — on the
+   boulevard the clav has the offbeats and the guitar only marks the backbeat. */
+const CHANK_REST = [10, 6, 14, 2];
 
 /* ══ ATLANTICA'S FOUR BARS ════════════════════════════════════════════
    Same disease the Soul Town bed had, and the same cure. Everything in the
@@ -2132,11 +2186,6 @@ const WATER_BASS4 = [
 /* EXTRA OPEN HATS per bar, on top of the offbeat 8ths every bar already has.
    A hat pattern that never opens anywhere else is a click track with a hiss. */
 const WATER_HAT = [[], [7], [11], [7, 15]];
-
-/* WHICH OFFBEAT THE GUITAR SITS OUT, per bar of the four. A chank on all four
-   offbeats of every bar is a metronome with a chord on it; one hole a bar, in
-   a different place each bar, is a player. */
-const CHANK_REST = [10, 6, 14, 2];
 
 /* ── THE TRACKS ─────────────────────────────────────────────────────────
    Everything that makes one track not the other, in one table. Adding a third
@@ -2161,7 +2210,12 @@ const TRACKS = {
   },
   soultown: {
     name:'Soul Town', num:'Track 02', brand:'Soul Town', blurb:'One in the morning, downtown. Ride the backbeat — <b>the tambourine is the grid</b>. Same five frets, major key.',
-    gears:[100,102,104,106], scale:PENT_MAJOR, roots:[0,4,1,3],
+    /* 104-116, up from 100-106. A shuffle needs somewhere to sit: at a
+       hundred flat the swung 16ths turn into a lope, and the clav cell only
+       starts driving once the 16ths are quick enough to blur. Still a dozen
+       beats slower than Atlantica's house tempo, which is the gap that has to
+       survive. */
+    gears:[104,108,112,116], scale:PENT_MAJOR, roots:[0,4,1,3],
     names:['C','D','E','G','A'], nodes:NODES_STREET, start:'motorrow',
     pal:PAL_STREET, world:'street', bed:'bedStreet', grid:true, answer:'hornShout',
     /* SLAP-BACK, not a hall. A single short repeat with almost no feedback is
@@ -2738,33 +2792,45 @@ const Clock = {
 
   /* ══ THE SOUL TOWN BED ══════════════════════════════════════════════
      Not the Atlantica groove slowed down — a different kind of groove, and
-     the differences are the whole point of the track existing.
+     the differences are the whole reason the track exists.
 
      NO SIDECHAIN PUMP. Atlantica breathes because house breathes: every kick
      slams the mix down and lets it swell back, and that pump IS the genre.
-     Motown was four people in a room with one set of microphones. Nothing
-     ducked anything. The duck is nearly flat here (0.90, not 0.30) and that
-     single number is most of why the two tracks feel different before a note
-     of melody is played.
+     Nothing ducked anything on these records. The duck is nearly flat here
+     (0.90, not 0.30) and that single number is most of why the two tracks
+     feel different before a note of melody is played.
 
      THE BACKBEAT IS THE LOUDEST THING. In house the kick is the event and 2
      and 4 answer it. Here it inverts: kick on 1 and 3 holding the floor, and
-     the snare on 2 and 4 as the hardest hit in the bar, doubled by handclaps
-     the way every record cut in that building was.
+     the snare on 2 and 4 as the hardest hit in the bar, doubled by handclaps.
 
-     TAMBOURINE ON EVERY 8TH. The single most identifying sound of the era —
-     it does the job hi-hats do everywhere else, and it is why these records
-     sound like they are moving even at 96bpm. Accented on the offbeat.
+     THE 16THS SHUFFLE. This is the thing that was missing, and no amount of
+     rewriting the patterns was ever going to supply it. A Stevie groove is not
+     straight and it is not a triplet shuffle either — it sits between, with
+     the e and the a of every beat arriving a little late while the beats and
+     the offbeat 8ths stay exactly where they are. Five and a half per cent of
+     a beat: too small to name, far too large to ignore. It is applied to the
+     ORNAMENTS ONLY — the clav, the ghosts, the hat, the guitar — and never to
+     the kick, the snare, the bass or the player, because the chart is drawn on
+     the grid and a rhythm game that plays behind its own picture feels broken.
+
+     THE CLAVINET IS THE ENGINE. Superstition's contribution. A two-bar cell in
+     swung 16ths, accented off the beat, carrying the groove the way hi-hats
+     carry it everywhere else — and it is a percussion instrument as much as a
+     pitched one, which is why it can play constantly without going stale the
+     way the horns did.
+
+     THE UNISON RUN IS THE HOOK. Sir Duke's contribution. Twice a minute the
+     band stops comping and bass, clav and section play one line together in
+     three octaves. See UNISON.
 
      THE BASS IS A MELODY. A house bassline is the root in the holes the kick
-     leaves. A Motown bassline is a countermelody with more notes in it than
-     the tune, walking the pentatonic under the singer. That is SOUL_BASS4:
-     four WRITTEN bars, not one figure with a moving root under it — see the
-     note on the tables themselves for why the difference is the whole groove.
+     leaves. This one is a countermelody with more notes in it than the tune,
+     walking the pentatonic under the singer — four WRITTEN bars, not one
+     figure with a moving root under it.
 
-     I–vi–ii–V. C · A · D · G, all four inside C major pentatonic, so the
-     "you cannot play a wrong note" guarantee survives a real chord progression
-     rather than a static vamp.
+     I–vi–ii–V. C · A · D · G, all four inside C major pentatonic, so the "you
+     cannot play a wrong note" guarantee survives a real progression.
 
      AND THE ROOM. Vinyl crackle, a slap-back instead of a flooded hall, and
      the whole thing sitting slightly dark. It should sound like it is coming
@@ -2772,51 +2838,131 @@ const Clock = {
 
      ══ AND THE STREET IS THE ARRANGEMENT ═══════════════════════════════
      One bed, three sizes, chosen by the width of the road you are on. Turning
-     is now a mix move, and it is the same gesture that steers — which is the
-     whole reason the city has street classes at all.
+     is a mix move, and it is the same gesture that steers — the whole reason
+     the city has street classes at all. The three are now told apart by WHICH
+     INSTRUMENT IS COMPING, not merely by how much of the band showed up:
 
-       MAIN ROAD (5)   the record as cut. Full kit, walking bass, chank on every
-                       offbeat, horns on the turnaround, I-vi-ii-V.
-       SIDE STREET (3) the band moves into a smaller room. Horns gone, chank
-                       only after the backbeat, tambourine on quarters, half the
-                       bassline - and the harmony sits down on the vi, so
-                       turning off the boulevard goes MINOR. That is the change
-                       you hear first, before you notice anything is missing.
-       ALLEY (1)       the break. Drums, one pedal note, a stick on the 8ths,
-                       and the mix starts pumping because there is nothing left
-                       to hold the floor. Four seconds of it and you are out.
+       MAIN ROAD (5)   a CLAVINET town. The cell runs all sixteen 16ths, the
+                       guitar only marks the two backbeat offbeats above it,
+                       the organ fills the middle, the section answers every
+                       eight bars, the unison run lands every sixteen, and the
+                       harmony is major and moving: I-vi-ii-V.
+       SIDE STREET (3) a GUITAR town. The clav stops playing notes and starts
+                       playing a muted wah chuck with no tune in it; the guitar
+                       takes the harmony back and chanks all four offbeats. The
+                       snare becomes a CROSS-STICK — no crack, no claps, which
+                       is the difference you hear before you notice anything is
+                       missing. Horns and organ gone. Tambourine on quarters.
+                       And the harmony sits down on the vi: turning off the
+                       boulevard goes MINOR, and stops moving.
+       ALLEY (1)       the break. Drums, one pedal note, a wah ghost two floors
+                       up, and the mix starts pumping because there is nothing
+                       left holding the floor. Four seconds of it and you are
+                       out.
 
      Everything below reads `cls` and nothing above it had to change: the
      scheduler still calls voice() once per 16th and the bed still decides what
      a 16th means. */
-  // vi - the relative minor. Turning off the main drag lands here.
-  SIDE_ROOTS: [4, 4, 3, 3],
+  // vi, and it stays there. Turning off the main drag lands on A minor and
+  // vamps — one lean onto the bVII in the third bar and back. Same five notes.
+  SIDE_ROOTS: [4, 4, 3, 4],
+
+  /* ── ONE BRASS NOTE ────────────────────────────────────────────────
+     Everything that makes a sawtooth sound like a horn rather than an organ
+     happens in the first forty milliseconds, and it is two things: the player
+     leans UP into the pitch, and the tone gets BRIGHTER as the air arrives.
+     A static filter is an organ however you set it. So: two saws a few cents
+     apart, a bend of a quarter-tone into the note, and a bandpass that opens
+     on the attack and closes again on the release. Through the slap-back with
+     everything else, because the section is in the room. */
+  brass(t, f, lvl, dur, dest){
+    const c = this.ctx;
+    for(const det of [-8, 7]){
+      const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
+      o.type = 'sawtooth'; o.detune.value = det;
+      o.frequency.setValueAtTime(f*0.945, t);
+      o.frequency.exponentialRampToValueAtTime(f, t + 0.030);
+      bp.type = 'bandpass'; bp.Q.value = 1.15;
+      bp.frequency.setValueAtTime(f*1.25, t);
+      bp.frequency.exponentialRampToValueAtTime(f*3.0, t + 0.045);
+      bp.frequency.exponentialRampToValueAtTime(f*1.5, t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(lvl, t + 0.016);
+      g.gain.setValueAtTime(lvl, t + dur*0.62);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(bp).connect(g).connect(dest);
+      const sd = c.createGain(); sd.gain.value = 0.45; g.connect(sd).connect(this.fx);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+  },
+
+  /* ── ONE CLAVINET NOTE ─────────────────────────────────────────────
+     A clavinet is a plucked string read by a magnetic pickup, and both halves
+     of that show up in the sound: an attack with no rise time at all, and
+     almost no fundamental — the body of the note lives an octave above where
+     the pitch is. Hence the highpass sitting AT the fundamental, which feels
+     wrong written down and is the only reason it reads as a clav and not as a
+     square-wave lead.
+
+     `wah` narrows the filter and swings it further, which is a pedal half
+     open. Side streets and alleys get it; the boulevard does not, because a
+     wah on the main riff is a different record.                             */
+  clav(t, f, lvl, dur, wah, dest){
+    const c = this.ctx;
+    const o = c.createOscillator(), o2 = c.createOscillator();
+    const hp = c.createBiquadFilter(), bp = c.createBiquadFilter(), g = c.createGain();
+    o.type  = 'square';   o.frequency.value = f;
+    o2.type = 'sawtooth'; o2.frequency.value = f; o2.detune.value = 7;
+    hp.type = 'highpass'; hp.frequency.value = f*0.9;
+    bp.type = 'bandpass'; bp.Q.value = wah ? 7 : 3.0;
+    bp.frequency.setValueAtTime(f*(wah ? 2.0 : 3.2), t);
+    bp.frequency.exponentialRampToValueAtTime(f*(wah ? 7.5 : 5.4), t + 0.030);
+    bp.frequency.exponentialRampToValueAtTime(f*1.7, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(lvl, t + 0.0025);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const mix = c.createGain(); mix.gain.value = 0.5;
+    o.connect(mix); o2.connect(mix);
+    mix.connect(hp).connect(bp).connect(g).connect(dest);
+    o.start(t); o2.start(t); o.stop(t + dur + 0.03); o2.stop(t + dur + 0.03);
+  },
+
   bedStreet(step, t){
     const s16 = step % 16, bar = Math.floor(step/16);
     const b4 = ((bar % 4) + 4) % 4, b8 = ((bar % 8) + 8) % 8;
+    const b16 = ((bar % 16) + 16) % 16;
     /* WHICH STREET, AT THIS 16TH. The scheduler runs 120ms ahead, so this is
        effectively "now": turn at a crossing and the very next 16th is already
        playing the new street. No fade, no bar-line wait - a corner is an edit. */
     const cls = TRACK.grid ? streetClsAt(step/4) : 5;
     const main = cls >= 5, side = cls === 3, alley = cls <= 1;
-    /* THE HARMONY MOVES ON THE BAR, on every street. An alley alternates root
-       and fifth: still the emptiest harmony in the track, still breathing on
-       the bar like everything else. */
-    const rootOf = k => alley ? (k % 2 ? ROOTS[3] : ROOTS[0])
-                              : (side ? this.SIDE_ROOTS : ROOTS)[((k % 4) + 4) % 4];
-    const root = rootOf(bar), rootNext = rootOf(bar + 1);
     const c = this.ctx, D = this.duck, K = D;
     const spb = this.spb();
-    /* THE LILT. A light swing, and it is on the ORNAMENTS only — the offbeat
-       tambourine, the ghost notes, the shaker. Not the kick, not the snare,
-       not the bass, and not the player: those stay dead on the grid, because
-       the chart is drawn on the grid and a rhythm game that plays behind its
-       own picture is a rhythm game that feels broken.
 
-       Five per cent of a beat is small enough that nobody can name it and
-       large enough that the bar stops marching. It is the difference between
-       a drum machine and a room. */
-    const SWG = spb*0.05;
+    /* ── THE SHUFFLE ───────────────────────────────────────────────
+       Odd 16ths — the e and the a — arrive late; even ones never move. That is
+       the entire difference between a machine and a band, and it is why the
+       clav below can play sixteen notes a bar without sounding like a
+       sequencer. Beats and offbeat 8ths stay dead on the grid, so nothing the
+       PLAYER has to hit is ever displaced. */
+    const SW = spb*0.055;
+    const sw = s => (s % 2) ? SW : 0;
+    const ts = t + sw(s16);
+
+    /* ── THE UNISON BREAK ──────────────────────────────────────────
+       Last two bars of every sixteen, boulevard only. `uslot` walks 0..31
+       through the written line. Turn off the main road mid-run and the run
+       simply stops, which is exactly what would happen if you walked out. */
+    const uni = main && b16 >= 14;
+    const uslot = (b16 - 14)*16 + s16;
+
+    /* THE HARMONY MOVES ON THE BAR, on every street. An alley alternates root
+       and fifth. The unison run pedals on the tonic, because a line that is
+       already the hook does not need a chord underneath it arguing with it. */
+    const rootOf = k => alley ? (k % 2 ? ROOTS[3] : ROOTS[0])
+                              : (side ? this.SIDE_ROOTS : ROOTS)[((k % 4) + 4) % 4];
+    const root     = uni ? ROOTS[0] : rootOf(bar);
+    const rootNext = uni ? ROOTS[0] : rootOf(bar + 1);
 
     /* THE ROOM NARROWS TOO. A slap-back is a reflection off a wall, and in an
        alley the wall is four feet away - so the send goes up as the street
@@ -2839,13 +2985,8 @@ const Clock = {
       /* SMACK IS A TRANSIENT, NOT A LEVEL. The bus has no headroom left to
          make anything louder with, and louder is not what "hits harder" means
          anyway — it means the first ten milliseconds arrive faster and harder
-         than what follows. So the pitch drop is quicker (0.045, was 0.055),
-         the attack is a third shorter, and the beater click is two layers
-         instead of one. Same peak, twice the punch.
-
-         Both click layers stay under 4kHz. A beater on a 1965 kit is wood on
-         a skin in a room, not a modern click — take it above that and it stops
-         being retro however hard it hits. */
+         than what follows. Both click layers stay under 4kHz: a beater on a
+         1965 kit is wood on a skin in a room, not a modern click. */
       o.frequency.setValueAtTime(132, t);
       o.frequency.exponentialRampToValueAtTime(45, t + 0.045);
       g.gain.setValueAtTime(0.0001, t);
@@ -2856,76 +2997,115 @@ const Clock = {
       this.noise(t, 0.004, 1500, 'bandpass', 0.20*soft, this.kickDrive);   // wood
       this.noise(t, 0.008, 3200, 'highpass', 0.13*soft, this.kickDrive);   // air
       /* Barely a duck — except in an alley, where it ducks like house does.
-         With the chank, the horns and most of the bass gone there is nothing
-         holding the floor between the drums, and the pump is what turns four
-         bars of near-silence into a break instead of a gap. */
+         With the clav, the guitar and the horns gone there is nothing holding
+         the floor between the drums, and the pump is what turns four bars of
+         near-silence into a break instead of a gap. */
       if(soft > 0.9){
         D.gain.setValueAtTime(alley ? 0.52 : 0.90, t);
         D.gain.exponentialRampToValueAtTime(1.0, t + (alley ? 0.19 : 0.10));
       }
     }
 
-    /* ── SNARE, CLAPS AND GHOSTS ───────────────────────────────────
-       The backbeat is the hardest hit in the bar and never moves — it is the
-       one thing in this track you can set your watch by. The claps are three
-       noise bursts a few ms apart, which is what a room full of people
-       clapping actually is and why one sample never sounds right. */
+    /* ── THE BACKBEAT, THREE WAYS ──────────────────────────────────
+       2 and 4, never anywhere else, on every street — it is the one thing in
+       this track you can set your watch by. What CHANGES is what is hitting
+       the drum, and that is the loudest single flag telling you which street
+       you are on:
+
+         boulevard  snare plus handclaps — three noise bursts a few ms apart,
+                    because that is what a room full of people clapping is and
+                    why one sample never sounds right;
+         side       CROSS-STICK. The stick laid across the head and struck on
+                    the rim: a dry wooden knock with the shell ringing under
+                    it, no crack and no claps. A band playing quietly;
+         alley      the snare again, but dry and hard and completely alone.
+                    A break still needs a backbeat to break against. */
     if(s16 === 4 || s16 === 12){
-      const sn = c.createOscillator(), sg = c.createGain();
-      sn.type = 'triangle';
-      sn.frequency.setValueAtTime(232, t);
-      sn.frequency.exponentialRampToValueAtTime(178, t + 0.05);
-      sg.gain.setValueAtTime(0.0001, t);
-      sg.gain.exponentialRampToValueAtTime(0.46, t + 0.0022);
-      sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
-      sn.connect(sg).connect(this.drive); sn.start(t); sn.stop(t + 0.18);
-      // The crack: a very short bright burst on top of the body, which is the
-      // stick hitting the skin. Capped at 4.8k — the snap of a snare on tape,
-      // not the sizzle of a sample.
-      this.noise(t, 0.010, 4800, 'highpass', 0.26, this.drive);
-      this.noise(t, 0.09, 2100, 'bandpass', 0.40, K);
-      for(let i=0;i<3;i++) this.noise(t + 0.004 + i*0.011, 0.05, 1500, 'bandpass', 0.30, K);
-      this.noise(t + 0.002, 0.16, 3600, 'highpass', 0.16, K);
+      if(side){
+        this.tone(t, 900, 'square', 0.0008, 0.040, 0.20, 3000, this.drive);
+        this.tone(t, 1720, 'triangle', 0.0006, 0.026, 0.10, 5400, this.drive);
+        this.noise(t, 0.011, 2500, 'bandpass', 0.13, this.drive);
+        this.noise(t, 0.055, 260, 'lowpass', 0.11, K);          // the shell rings
+      } else {
+        const sn = c.createOscillator(), sg = c.createGain();
+        sn.type = 'triangle';
+        sn.frequency.setValueAtTime(232, t);
+        sn.frequency.exponentialRampToValueAtTime(178, t + 0.05);
+        sg.gain.setValueAtTime(0.0001, t);
+        sg.gain.exponentialRampToValueAtTime(0.46, t + 0.0022);
+        sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+        sn.connect(sg).connect(this.drive); sn.start(t); sn.stop(t + 0.18);
+        // The crack: a very short bright burst on top of the body, which is
+        // the stick hitting the skin. Capped at 4.8k — the snap of a snare on
+        // tape, not the sizzle of a sample.
+        this.noise(t, 0.010, 4800, 'highpass', 0.26, this.drive);
+        this.noise(t, 0.09, 2100, 'bandpass', 0.40, K);
+        if(main){                                                // the claps
+          for(let i=0;i<3;i++) this.noise(t + 0.004 + i*0.011, 0.05, 1500, 'bandpass', 0.30, K);
+          this.noise(t + 0.002, 0.16, 3600, 'highpass', 0.16, K);
+        }
+      }
     }
     // And the ghosts between them, swung, at a tenth of the level.
     if(SOUL_GHOST[b4].indexOf(s16) >= 0){
-      const gt = t + (s16 % 2 ? SWG : 0);
+      const gt = t + sw(s16);
       this.noise(gt, 0.035, 1900, 'bandpass', alley ? 0.040 : 0.055, K);
       this.noise(gt + 0.003, 0.02, 3800, 'highpass', 0.030, K);
     }
 
     /* ── TAMBOURINE ────────────────────────────────────────────────
-       On every 8th, on every street, always. This track's own instructions
-       say the tambourine is the grid, and a grid that thins out when the road
-       does is not a grid. The street changes its TONE and its level, never
-       its placement — and the offbeat carries the lilt. */
-    if(s16 % 2 === 0){
-      const off = (s16 % 4 === 2), tt = t + (off ? SWG : 0);
-      const lvl = alley ? 0.78 : side ? 0.88 : 1.0;
+       This track's own instructions say the tambourine is the grid, so on the
+       boulevard it plays every 8th and never misses one. Indoors it halves to
+       the quarters — the same grid, counted bigger, which is what a player
+       does when the room gets small. Placement never moves off the beat, so
+       the thing the chart is drawn against is never displaced. */
+    if(main ? (s16 % 2 === 0) : (s16 % 4 === 0)){
+      const off = (s16 % 4 === 2);
+      const lvl = alley ? 0.80 : side ? 0.90 : 1.0;
       const hz  = alley ? 5200 : side ? 6600 : 7600;
-      const g = (off ? 0.21 : 0.11) * (0.86 + Math.random()*0.28) * lvl;
-      this.noise(tt, off ? (alley ? 0.042 : 0.075) : 0.045,
-                 hz + Math.random()*1800, 'highpass', g, K);
-      this.noise(tt + 0.006, 0.03, alley ? 8000 : 11000, 'highpass', g*0.5, K);
-      // Indoors the offbeat gets a stick ON TOP of the tambourine, not instead
-      // of it: the same grid, struck harder, in a smaller room.
-      if(off && !main){
-        this.noise(tt, 0.018, 6200, 'bandpass', side ? 0.07 : 0.11, K);
-        this.tone(tt, side ? 1320 : 1180, 'square', 0.001, 0.022, side ? 0.04 : 0.07, 4600, K);
-      }
+      const g = (off ? 0.21 : 0.12) * (0.86 + Math.random()*0.28) * lvl;
+      this.noise(t, off ? 0.075 : 0.045, hz + Math.random()*1800, 'highpass', g, K);
+      this.noise(t + 0.006, 0.03, alley ? 8000 : 11000, 'highpass', g*0.5, K);
     }
-    /* NO SHAKER. One was added here on the odd 16ths at 9–11.5kHz, meant to be
-       felt rather than heard. It was heard: a thin hiss sitting on top of a
-       track whose whole character is a 1965 tape machine that rolls off well
-       below it. Anything up there reads as modern before it reads as anything
-       else, and no amount of turning it down fixes being in the wrong decade —
-       so it is gone rather than quieter. The tambourine already owns the 8ths
-       and the ghosts already own the space between them. */
+
+    /* ── THE HAT, AND WHY IT LIVES SO LOW ──────────────────────────
+       Sixteen swung 16ths under everything, boulevard only, and quiet enough
+       that you are meant to feel the shuffle rather than hear a cymbal. A
+       shaker was tried here once at 9–11kHz and cut, correctly: anything up
+       there reads as MODERN before it reads as anything else, and no amount of
+       turning it down fixes being in the wrong decade. So this one sits in a
+       narrow band at 4.6k, which is where a closed hat lands after a tape
+       machine has had it. Same job, right decade. */
+    if(main && (s16 % 2 === 1)){
+      this.noise(t + SW, 0.022, 4600, 'bandpass', 0.030 + Math.random()*0.012, K);
+    }
+
+    /* ══ THE UNISON RUN ══════════════════════════════════════════════
+       Bass, clavinet and horn section on ONE line, in three octaves, and
+       nothing else pitched is allowed to play while it does. Each note holds
+       until the next one, so the written rests are heard as long notes rather
+       than as gaps — which is what makes a run of 16ths sound sung instead of
+       typed. */
+    if(uni){
+      const d = UNISON[uslot];
+      if(d !== null){
+        let n = uslot + 1; while(n < 32 && UNISON[n] === null) n++;
+        const hold = (n - uslot) * spb/4;
+        const ut = t + sw(s16);
+        const deg = root + d;
+        // the bass, bottom octave — same voice it plays the rest of the time
+        this.soulBass(ut, p(deg), Math.min(hold*0.92, 0.46), 0.42, K);
+        // the clav and the guitar, two octaves up, doubling each other
+        this.clav(ut, p(deg + 10), 0.24, Math.min(hold*0.85, 0.26), false, K);
+        // and the section, in two octaves on top of that
+        this.brass(ut, p(deg + 5),  0.075, Math.min(hold*0.95, 0.42), K);
+        this.brass(ut, p(deg + 10), 0.090, Math.min(hold*0.95, 0.42), K);
+      }
+      return this.vinyl(t, spb, alley);          // nothing else plays. That is the point.
+    }
 
     /* ── THE BASSLINE ──────────────────────────────────────────────
-       Four written bars, not one figure with a moving root. Triangle through
-       a resonant lowpass with a fast attack: a wound string on a hollow body,
-       not a synth.
+       Four written bars, not one figure with a moving root.
 
        THE LAST 16TH OF EVERY BAR PLAYS THE NEXT BAR'S ROOT. Anticipating the
        chord change by a 16th is the oldest trick in soul bass playing and the
@@ -2938,49 +3118,75 @@ const Clock = {
       const early = (ss === 15);
       let deg = (early ? rootNext : root) + (alley ? (s16 === 8 ? 3 : 0) : dd);
       while(deg > 8) deg -= 5;
-      const f = p(Math.max(0, deg));
-      const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
-      o.type = 'triangle'; o.frequency.value = f;
-      lp.type = 'lowpass'; lp.Q.value = 4;
-      lp.frequency.setValueAtTime(f*9, t);
-      lp.frequency.exponentialRampToValueAtTime(f*2.6, t + 0.10);
       const bdur = alley ? 0.62 : (ss % 2 ? 0.15 : 0.26);   // offbeats clipped short
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(alley ? 0.44 : 0.38, t + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + bdur);
-      o.connect(lp).connect(g).connect(K);
-      o.start(t); o.stop(t + bdur + 0.04);
+      this.soulBass(t, p(Math.max(0, deg)), bdur, alley ? 0.44 : 0.38, K);
     }
 
-    /* ── THE CHANK ─────────────────────────────────────────────────
-       The guitar-and-piano upstroke on the offbeat 8ths that fills the space
-       between the kick and the snare. Three consecutive pentatonic degrees, so
-       it is a real triad and cannot clash with anything the player does above
-       it — and it DROPS OUT on one offbeat a bar, different each bar, because
-       a chank on all four is a metronome with a chord on it. */
-    if(s16 % 4 === 2 && !alley && s16 !== CHANK_REST[b4]){
-      const voice = b4 % 2 ? 11 : 10;
+    /* ── THE CLAVINET ──────────────────────────────────────────────
+       The boulevard's comping instrument, and the thing carrying the shuffle.
+       Two bars of cell against four bars of chords, so it says the same thing
+       twice while the harmony walks underneath — and because every degree is
+       an offset from the bar's root, "the same thing" is a different set of
+       notes each time.
+
+       Indoors it stops being a riff and becomes a CHUCK: one muted note, no
+       tune, wah half open, on the 16ths between the guitar's chanks. Same
+       instrument, no melody left in it — which is the sound of a player
+       keeping time rather than a player playing a part. */
+    if(main){
+      for(const [ss, dd, lv] of CLAV2[bar % 2]){
+        if(ss !== s16) continue;
+        this.clav(t + sw(ss), p(root + 10 + dd), 0.115*lv,
+                  (ss % 2 ? 0.085 : 0.13), false, K);
+      }
+    } else if(side){
+      if(s16 % 4 === 1 || s16 % 4 === 3)
+        this.clav(t + SW, p(root + 10), 0.055, 0.055, true, K);
+    } else if(s16 === 6 || s16 === 14){
+      /* THE ALLEY GHOST. Somebody's clav, two floors up, through a wah and a
+         window. Twice a bar, and it is the only pitched thing besides the
+         pedal note that survives down here. */
+      this.clav(t + SW, p(root + 10), 0.045, 0.30, true, K);
+    }
+
+    /* ── THE GUITAR ────────────────────────────────────────────────
+       Three pentatonic degrees running, so it is a real triad and cannot clash
+       with anything the player does above it.
+
+       ON THE BOULEVARD it only marks the two offbeats either side of the
+       backbeat, high and thin, because the clav already owns the 16ths and two
+       instruments comping the same holes is mud rather than a band.
+
+       ON A SIDE STREET it takes the harmony back: all four offbeats, an octave
+       lower, louder, with one hole a bar in a different place each bar. A
+       chank on all four of every bar is a metronome with a chord on it; one
+       hole a bar is a player. */
+    const chanks = main ? (s16 === 6 || s16 === 14)
+                        : (side && s16 % 4 === 2 && s16 !== CHANK_REST[b4]);
+    if(chanks){
+      const voice = (main ? 13 : 10) + (b4 % 2);
       for(let i=0;i<3;i++){
         const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
         o.type = 'triangle'; o.frequency.value = p(root + voice + i);
         o.detune.value = (i-1)*4;                       // a room, not a chip
-        lp.type = 'lowpass'; lp.frequency.value = 2600;
-        g.gain.setValueAtTime(0.0001, t + SWG);
-        g.gain.exponentialRampToValueAtTime(side ? 0.070 : 0.095, t + SWG + 0.006);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + SWG + 0.13);
+        lp.type = 'lowpass'; lp.frequency.value = main ? 3400 : 2600;
+        g.gain.setValueAtTime(0.0001, t + SW);
+        g.gain.exponentialRampToValueAtTime(main ? 0.055 : 0.082, t + SW + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + SW + (main ? 0.10 : 0.14));
         o.connect(lp).connect(g).connect(K);
-        o.start(t + SWG); o.stop(t + SWG + 0.16);
+        o.start(t + SW); o.stop(t + SW + 0.18);
       }
     }
 
     /* ── THE ORGAN ─────────────────────────────────────────────────
        One held chord a bar, under everything, so quiet you only notice it
-       when the alley takes it away. This is what the horns were being asked
-       to do and could not: fill the middle of the mix continuously. Brass is
-       an EVENT and turns to wallpaper the moment it is asked to be a texture;
-       a drawbar organ is a texture and never tires, which is exactly why every
-       record cut in that room has one and why you cannot hum it. */
-    if(s16 === 0 && !alley){
+       when the turn takes it away. This is what the horns were being asked to
+       do and could not: fill the middle of the mix continuously. Brass is an
+       EVENT and turns to wallpaper the moment it is asked to be a texture; a
+       drawbar organ is a texture and never tires, which is exactly why every
+       record cut in that room has one and why you cannot hum it. Boulevard
+       only now — losing it is half of what makes a side street feel smaller. */
+    if(s16 === 0 && main){
       const dur = spb*4;
       for(const d of [10, 12, 14]){
         const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
@@ -2988,67 +3194,81 @@ const Clock = {
         o.detune.value = (Math.random()-0.5)*6;
         lp.type = 'lowpass'; lp.frequency.value = 1700;
         g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(side ? 0.019 : 0.026, t + 0.10);
-        g.gain.setValueAtTime(side ? 0.019 : 0.026, t + dur*0.72);
+        g.gain.exponentialRampToValueAtTime(0.026, t + 0.10);
+        g.gain.setValueAtTime(0.026, t + dur*0.72);
         g.gain.exponentialRampToValueAtTime(0.0001, t + dur*0.98);
         o.connect(lp).connect(g).connect(K);
         o.start(t); o.stop(t + dur);
       }
     }
 
-    /* ── THE HORN RIFF, once every eight bars ──────────────────────
-       Not a stab on the turnaround of every four. A written five-note line
-       that lands on the last bar of the phrase and answers everything that
-       came before it, so it arrives about twice a minute and is a HOOK rather
-       than a habit. Boulevard only — the section does not follow you into an
-       alley. */
-    if(main && b8 === 7){
-      for(const [ss, dd, lvl] of HORN_RIFF){
+    /* ── THE SECTION ───────────────────────────────────────────────
+       Three stabs, once every eight bars, on the bar the bass climbs — and
+       voiced as a stack of pentatonic degrees rather than a unison, so it
+       reads as several players rather than one loud one. It answers the
+       phrase; it does not accompany it. Boulevard only: the horn section does
+       not follow you into an alley. */
+    if(main && b8 === 3){
+      for(const [ss, dd, lvl] of HORN_STAB){
         if(ss !== s16) continue;
-        for(const det of [-7, 7]){
-          const f0 = p(root + dd);
-          const o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain();
-          o.type = 'sawtooth'; o.detune.value = det;
-          o.frequency.setValueAtTime(f0*0.955, t);        // the doit into the note
-          o.frequency.exponentialRampToValueAtTime(f0, t + 0.035);
-          bp.type = 'bandpass'; bp.Q.value = 1.5; bp.frequency.value = f0*2.3;
-          g.gain.setValueAtTime(0.0001, t);
-          g.gain.exponentialRampToValueAtTime(lvl, t + 0.018);
-          g.gain.setValueAtTime(lvl, t + 0.10);
-          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
-          o.connect(bp).connect(g).connect(K);
-          const sd = c.createGain(); sd.gain.value = 0.5; g.connect(sd).connect(this.fx);
-          o.start(t); o.stop(t + 0.34);
-        }
+        /* Rooted low — G3 at the bottom of the stack, E5 at the very top of
+           the highest voicing. That is where a real section sits, and it is
+           deliberately UNDER the clav rather than over it: horns that scream
+           above the riff are a fanfare, horns that answer from underneath it
+           are a band. */
+        for(const v of [0, 2, 4])
+          this.brass(t, p(root + 8 + dd + v), lvl*(v ? 0.72 : 1), 0.26, K);
       }
     }
 
     /* ── THE FILL ──────────────────────────────────────────────────
-       The last beat of every eight bars. A groove with no fill in it is a
-       loop with no seams, and the seams are how you know where you are: the
-       fill is the only thing in the bed that tells you a phrase just ended
-       and another is starting. Snare 16ths climbing, and a tom on the way out.
-       Everywhere, including the alley — a break still has to breathe. */
+       The last beat of every eight bars. A groove with no fill in it is a loop
+       with no seams, and the seams are how you know where you are: the fill is
+       the only thing in the bed that says a phrase just ended and another is
+       starting. Snare 16ths climbing, and a tom on the way out. Everywhere,
+       including the alley — a break still has to breathe. */
     if(b8 === 7 && s16 >= 12){
       const u = (s16 - 12)/3;
-      this.noise(t, 0.05, 1800 + u*900, 'bandpass', 0.13 + u*0.24, K);
-      this.noise(t + 0.004, 0.03, 3600, 'highpass', 0.06 + u*0.10, K);
+      this.noise(ts, 0.05, 1800 + u*900, 'bandpass', 0.13 + u*0.24, K);
+      this.noise(ts + 0.004, 0.03, 3600, 'highpass', 0.06 + u*0.10, K);
       if(s16 === 15){
         const o = c.createOscillator(), g = c.createGain();
         o.type = 'sine';
-        o.frequency.setValueAtTime(190, t);
-        o.frequency.exponentialRampToValueAtTime(96, t + 0.14);
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(0.46, t + 0.006);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
-        o.connect(g).connect(this.drive); o.start(t); o.stop(t + 0.30);
+        o.frequency.setValueAtTime(190, ts);
+        o.frequency.exponentialRampToValueAtTime(96, ts + 0.14);
+        g.gain.setValueAtTime(0.0001, ts);
+        g.gain.exponentialRampToValueAtTime(0.46, ts + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, ts + 0.26);
+        o.connect(g).connect(this.drive); o.start(ts); o.stop(ts + 0.30);
       }
     }
 
-    /* VINYL. A record is not silent between the notes — it ticks. Sparse,
-       random, and quiet enough that you only notice it when it stops. Louder
-       in an alley, where the record is not the mix: it is somebody's window,
-       two floors up, and it is the only thing there. */
+    this.vinyl(t, spb, alley);
+  },
+
+  /* ONE BASS NOTE. Triangle through a resonant lowpass with a fast attack and
+     a filter that shuts as the note decays: a wound string on a hollow body,
+     not a synth. Pulled out of the bed so the unison run can play the same
+     instrument rather than an imitation of it. */
+  soulBass(t, f, dur, peak, dest){
+    const c = this.ctx;
+    const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
+    o.type = 'triangle'; o.frequency.value = f;
+    lp.type = 'lowpass'; lp.Q.value = 4;
+    lp.frequency.setValueAtTime(f*9, t);
+    lp.frequency.exponentialRampToValueAtTime(f*2.6, t + 0.10);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(lp).connect(g).connect(dest);
+    o.start(t); o.stop(t + dur + 0.04);
+  },
+
+  /* VINYL. A record is not silent between the notes — it ticks. Sparse,
+     random, and quiet enough that you only notice it when it stops. Louder in
+     an alley, where the record is not the mix: it is somebody's window, two
+     floors up, and it is the only thing there. */
+  vinyl(t, spb, alley){
     if(Math.random() < (alley ? 0.55 : 0.30))
       this.noise(t + Math.random()*spb*0.25, 0.004,
                  2600 + Math.random()*5200, 'highpass',
