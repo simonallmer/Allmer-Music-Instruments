@@ -4,3 +4,6 @@
 
 # Local tooling
 .claude/
+
+# Demo build — its own repo (Beat-Race-Demo)
+Beat Race Demo/
