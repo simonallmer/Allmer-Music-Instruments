@@ -5,5 +5,7 @@
 # Local tooling
 .claude/
 
-# Demo build — its own repo (Beat-Race-Demo)
+# The Arcade builds, each in its own repo. They live next to the hub build
+# they copy from so syncing is a file copy rather than a checkout.
+Beat Race Standalone/
 Beat Race Demo/
