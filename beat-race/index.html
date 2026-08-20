@@ -3685,16 +3685,45 @@ const Game = {
     return true;
   },
 
+  /* Returns TRUE when the press was consumed as a TURN — taken, forked or
+     armed — and false when it was an ordinary lane move. The keyboard handler
+     reads it to decide whether the hold that follows should arm anything: a
+     press that has already been spent on the corner must not be spent on it
+     twice, which it silently was. Hold LEFT on the leftmost lane and the tap
+     armed the turn, then the 190ms timer armed it AGAIN — and arming twice is
+     how you disarm. The turn you asked for by holding the key was cancelled by
+     the fact that you held the key. */
   tryLane(dir){
-    if(this.dead || !Clock.started || Clock.paused) return;
-    // At a crossing, sideways means TURN — not change lane. Never in the
-    // melody layer, where sideways is a pitch.
-    if(!this.inMelody && this.takeTurn(dir)) return;
+    if(this.dead || !Clock.started || Clock.paused) return false;
     const b = Clock.songBeat();
     const grid = Math.round(b*2)/2;               // nearest 8th
     const err = b - grid;                          // <0 early, >0 late
     const sp = laneSpanAt(b);
     const target = Math.max(sp.lo, Math.min(sp.hi, this.lane + dir));
+
+    /* ── A TURN IS AN OUTWARD PRESS, AND ONLY AN OUTWARD PRESS ──────
+       A crossing used to swallow the input from ANY lane: inside the window,
+       sideways meant turn, full stop. The window is 1.15 beats of an 8-beat
+       block, so roughly one press in seven near a junction took a corner the
+       player had not asked for — and the worst version of it was pressing
+       RIGHT from the leftmost lane, which is unambiguously "put me back in the
+       middle" and came out as a right turn onto a side street.
+
+       So the tap only turns when the press has nowhere else to go: LEFT from
+       the leftmost lane, RIGHT from the rightmost lane, and never otherwise.
+       Anywhere the lane change is a legal move, the lane change wins. That is
+       the rule players already had in their heads — it is what "press further
+       out than the road goes" means everywhere else in this file, and it is
+       what the junction fork and the octave bump both already do.
+
+       Nothing is lost by it, because the OUTWARD press is exactly the gesture
+       that had no other meaning: it is dead input otherwise, which is why the
+       same press arms a turn when there is no crossing in range. Turning from
+       a middle lane is still available and still costs nothing — hold the key
+       instead of tapping it and the turn fires by itself at the next corner. */
+    const outward = (dir < 0 && this.lane <= sp.lo) || (dir > 0 && this.lane >= sp.hi);
+    // Never in the melody layer, where sideways is a pitch.
+    if(outward && !this.inMelody && this.takeTurn(dir)) return true;
 
     /* BRANCHING — no new verb. Pressing further out than the outermost lane is a
        meaningless input everywhere else on the track, so at a junction it means
@@ -3711,7 +3740,7 @@ const Game = {
         } else {
           judge('MISTIMED', '#e8642a'); Clock.flam();
         }
-        return;
+        return true;
       }
       /* Pressing further out than the road goes, with no fork open to take.
          It was a dead input; now it arms the turn — so the gesture players
@@ -3719,7 +3748,7 @@ const Game = {
          working, and works anywhere in the block instead of only inside the
          window it used to need. */
       this.armTurn(dir);
-      return;
+      return true;
     }
     if(Math.abs(err) <= 0.13){
       this.lane = target; this.slide = 0;
@@ -3729,6 +3758,7 @@ const Game = {
       judge('SLIP', '#e8642a'); Clock.flam();
       this.flowChain = 0; this.mult = 1;           // sloppy timing breaks the chain
     }
+    return false;
   },
 
   jump(){ if(this.dead||!Clock.started||Clock.paused) return;
@@ -4074,8 +4104,8 @@ addEventListener('keydown', e=>{
     }
     return;
   }
-  if(k==='arrowleft')       { Game.tryLane(-1); beginHold(-1); e.preventDefault(); }
-  else if(k==='arrowright') { Game.tryLane(1);  beginHold(1);  e.preventDefault(); }
+  if(k==='arrowleft')       { if(!Game.tryLane(-1)) beginHold(-1); e.preventDefault(); }
+  else if(k==='arrowright') { if(!Game.tryLane(1))  beginHold(1);  e.preventDefault(); }
   else if(k==='arrowup'){ Game.jump(); e.preventDefault(); }
 });
 /* ── TAP MOVES, HOLD TURNS ───────────────────────────────────────────────
@@ -4190,7 +4220,9 @@ const swipeMin = () =>
 const swipeGate = () => { const m = swipeMin();
   return Game.inMelody ? {x:m*1.5, y:m} : {x:m, y:m*1.5}; };
 
-/* Perform the move a stroke of (dx,dy) means, in whichever layer we are in. */
+/* Perform the move a stroke of (dx,dy) means, in whichever layer we are in.
+   Hands back tryLane()'s verdict — true if the stroke was spent on a turn — so
+   the on-screen pads can skip the hold the same way the keyboard does. */
 function swipe(dx, dy){
   if(Game.auto){ Game.auto = false; judge('AUTORIDE OFF', '#7f97a8'); }
   const g = swipeGate();
@@ -4210,7 +4242,8 @@ function swipe(dx, dy){
     tdbg((horiz?'swipe ':'swipe ') + (up ? 'UP' : 'DOWN') + ' → staff');
     return;
   }
-  if(horiz){ Game.tryLane(dx > 0 ? 1 : -1); tdbg('swipe ' + (dx>0?'RIGHT':'LEFT') + ' → lane'); }
+  if(horiz){ const turned = Game.tryLane(dx > 0 ? 1 : -1);
+    tdbg('swipe ' + (dx>0?'RIGHT':'LEFT') + ' → lane'); return turned; }
   else if(dy < 0){ Game.jump(); tdbg('swipe UP → jump'); }
   else tdbg('swipe DOWN → nothing here');
   // down in chase view: nothing below the deck, nothing to do
@@ -4392,12 +4425,13 @@ function padHit(dir, el){
   if(now - padLast < 80) return;
   padLast = now;
   if(!Clock.started || Clock.paused) return;
-  const d = PAD_DIR[dir]; if(!d) return;
+  const d = PAD_DIR[dir]; if(!d) return false;
   const g = swipeGate();
-  swipe(d[0] * g.x * 2, d[1] * g.y * 2);      // a gesture, minus the finger
+  const turned = swipe(d[0] * g.x * 2, d[1] * g.y * 2);   // a gesture, minus the finger
   hideTouchHint();
   el.classList.add('hit');
   setTimeout(()=> el.classList.remove('hit'), 110);
+  return turned;
 }
 padsEl.querySelectorAll('.pk').forEach(el=>{
   const dir = el.dataset.dir;
@@ -4405,8 +4439,10 @@ padsEl.querySelectorAll('.pk').forEach(el=>{
      come back up has already missed the note. stopPropagation keeps the
      press out of the gesture machine — a button is not a swipe and not a
      tap, and a tap here would otherwise count toward the view-switch. */
-  const fire = e => { e.preventDefault(); e.stopPropagation(); padHit(dir, el);
-    if(dir === 'left' || dir === 'right') beginHold(dir === 'left' ? -1 : 1); };
+  const fire = e => { e.preventDefault(); e.stopPropagation();
+    const turned = padHit(dir, el);
+    if(!turned && (dir === 'left' || dir === 'right'))
+      beginHold(dir === 'left' ? -1 : 1); };
   el.addEventListener('touchstart', fire, {passive:false});
   el.addEventListener('pointerdown', fire);
   // Hold the pad, same as holding the key: tap moves, hold turns.
